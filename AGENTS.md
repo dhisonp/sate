@@ -19,6 +19,7 @@ Zero third-party packages. Swift Testing (`@Test`/`#expect`), not XCTest.
 ./scripts/lint.sh                     # swiftlint
 ./scripts/format.sh                   # swiftformat
 ./scripts/build.sh                    # xcodebuild the iOS app
+./scripts/run.sh                      # build, install, and launch in simulator (live mode, SATE_MOCK=0)
 ./scripts/e2e.sh                      # boot sim, install, drive via SATE_DEMO, screenshot
 ./scripts/capture-fixtures.sh <model> # operator-run; needs SATE_CF_ACCOUNT + SATE_CF_TOKEN
 ```
