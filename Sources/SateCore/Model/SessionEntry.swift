@@ -14,8 +14,12 @@ public enum SessionEntry: Sendable {
     case leaf(id: UUID, timestamp: Date)
     /// Renames or re-models the conversation after creation.
     case update(title: String?, model: String?, timestamp: Date)
-    /// A line this build does not understand; preserved verbatim so a
-    /// round-trip does not destroy it.
+    /// A line this build does not understand — a `type` from a newer schema.
+    ///
+    /// The body is NOT captured (`raw` decodes as ""): the transcript is
+    /// append-only and no code path ever rewrites an existing line, so an
+    /// unknown entry is simply skipped on load and left untouched on disk. That
+    /// is what preserves it for the build that does understand it.
     case unknown(type: String, raw: String)
 }
 

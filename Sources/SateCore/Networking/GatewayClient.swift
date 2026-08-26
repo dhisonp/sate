@@ -25,6 +25,11 @@ public struct GatewayConfiguration: Sendable {
     public var metadata: [String: String]
     public var idleTimeout: TimeInterval
     public var resourceTimeout: TimeInterval
+    /// R1.1's connectivity budget: how long the client waits for a connection to
+    /// be established before calling it `.offline`. `waitsForConnectivity` folds
+    /// its wait into `resourceTimeout`, so without this the offline case would
+    /// take 15 minutes to surface. Zero or less disables the budget.
+    public var connectivityTimeout: TimeInterval
 
     public init(
         accountID: String = "",
@@ -37,7 +42,8 @@ public struct GatewayConfiguration: Sendable {
         collectLogPayload: Bool = true,
         metadata: [String: String] = [:],
         idleTimeout: TimeInterval = 120,
-        resourceTimeout: TimeInterval = 900
+        resourceTimeout: TimeInterval = 900,
+        connectivityTimeout: TimeInterval = 10
     ) {
         self.accountID = accountID
         self.gatewayID = gatewayID
@@ -50,6 +56,7 @@ public struct GatewayConfiguration: Sendable {
         self.metadata = metadata
         self.idleTimeout = idleTimeout
         self.resourceTimeout = resourceTimeout
+        self.connectivityTimeout = connectivityTimeout
     }
 
     public var isConfigured: Bool {
@@ -261,15 +268,25 @@ public actor GatewayClient: LLMStreaming {
         var trace: NetworkTrace
     }
 
-    /// Coalesced terminal state. The codec reports a `.finished` for both the
-    /// `finish_reason` chunk and the usage trailer; exactly one reaches the caller.
+    /// Coalesced terminal state. The codec reports termination for both the
+    /// `finish_reason` chunk and the usage trailer; exactly one `.finished`
+    /// reaches the caller.
     private struct TerminalState {
         var reason: FinishReason?
         var usage: Usage?
 
-        mutating func absorb(_ reason: FinishReason, _ usage: Usage?) {
-            if self.reason == nil { self.reason = reason }
-            if let usage { self.usage = usage }
+        /// Only a chunk that ACTUALLY carried `finish_reason` may set the reason
+        /// — `ChunkTermination.reason` is nil for a usage-only trailer. A trailer
+        /// that arrives before the finish chunk (or on every chunk, as with
+        /// cumulative usage) must not be able to pin the generation to `.stop`
+        /// and hide a real `length`/`content_filter` from the user.
+        ///
+        /// FIRST observed reason wins: a second `finish_reason` in one stream is a
+        /// provider bug, and the first one describes the generation that ended.
+        /// The LAST usage wins, because cumulative usage grows chunk by chunk.
+        mutating func absorb(_ termination: ChatCompletionsCodec.ChunkTermination) {
+            if reason == nil, let observed = termination.reason { reason = observed }
+            if let usage = termination.usage { self.usage = usage }
         }
     }
 
@@ -287,7 +304,7 @@ public actor GatewayClient: LLMStreaming {
         let bytes: URLSession.AsyncBytes
         let response: URLResponse
         do {
-            (bytes, response) = try await session.bytes(for: urlRequest)
+            (bytes, response) = try await connect(urlRequest)
         } catch {
             trace.duration = Date().timeIntervalSince(start)
             throw AttemptFailure(error: Self.map(error, bytesReceived: 0), trace: trace)
@@ -336,6 +353,91 @@ public actor GatewayClient: LLMStreaming {
         }
     }
 
+    /// Carries the connect race's outcome back out of a task group.
+    ///
+    /// `URLSession.AsyncBytes` is not `Sendable`, so it cannot be a task-group
+    /// return value. Handing it back through a locked box is safe here: exactly
+    /// one task ever writes the box, the reader only looks after that task has
+    /// completed, and `URLSession` itself is documented thread-safe.
+    private final class ConnectOutcome: @unchecked Sendable {
+        enum Value {
+            case connected(URLSession.AsyncBytes, URLResponse)
+            case failed(any Error)
+            case expired
+        }
+
+        private let lock = NSLock()
+        private var value: Value?
+
+        /// First settlement wins: the loser of the race is cancelled and will
+        /// report a cancellation that must not overwrite the real outcome.
+        func settle(_ new: Value) {
+            lock.lock()
+            defer { lock.unlock() }
+            if value == nil { value = new }
+        }
+
+        var settled: Value? {
+            lock.lock()
+            defer { lock.unlock() }
+            return value
+        }
+    }
+
+    /// Opens the response, enforcing R1.1's client-side connectivity budget.
+    ///
+    /// `waitsForConnectivity` stays ON — it quietly recovers a send made while the
+    /// radio is switching networks — but it also SWALLOWS
+    /// `URLError.notConnectedToInternet`, so an offline send would otherwise block
+    /// until `timeoutIntervalForResource` (900 s) and then surface as
+    /// `URLError.timedOut` → `.idleTimeout`: a retriable error, so the client
+    /// retries and the user watches "Sending…" for half an hour before being told
+    /// the model stopped responding. `GatewayError.offline` would be unreachable
+    /// in production.
+    ///
+    /// The budget covers the pre-first-byte phase only, so it cannot be expressed
+    /// as `URLRequest.timeoutInterval` (which URLSession also applies as the idle
+    /// timeout for the whole stream, and would kill a slow generation mid-answer).
+    /// Racing the connect against a timer is the one form that bounds exactly the
+    /// phase that needs bounding.
+    private nonisolated func connect(
+        _ urlRequest: URLRequest
+    ) async throws -> (URLSession.AsyncBytes, URLResponse) {
+        let budget = configuration.connectivityTimeout
+        guard budget > 0 else { return try await session.bytes(for: urlRequest) }
+
+        let outcome = ConnectOutcome()
+        // Neither child throws, so the group's implicit drain cannot resurface a
+        // cancellation from the loser as this call's error.
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { [session] in
+                do {
+                    let (bytes, response) = try await session.bytes(for: urlRequest)
+                    outcome.settle(.connected(bytes, response))
+                } catch {
+                    outcome.settle(.failed(error))
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(budget * 1_000_000_000))
+                outcome.settle(.expired)
+            }
+            await group.next()
+            // Cancels the loser: the timer if we connected, otherwise the
+            // URLSession task, which must not outlive a send we have given up on.
+            group.cancelAll()
+        }
+
+        switch outcome.settled {
+        case .connected(let bytes, let response):
+            return (bytes, response)
+        case .failed(let error):
+            throw error
+        case .expired, nil:
+            throw GatewayError.offline
+        }
+    }
+
     private nonisolated func streamSSE(
         _ bytes: URLSession.AsyncBytes,
         trace: NetworkTrace,
@@ -356,18 +458,15 @@ public actor GatewayClient: LLMStreaming {
             buffer.removeAll(keepingCapacity: true)
             for event in events {
                 if event.isTerminator { done = true; continue }
-                for streamEvent in try codec.decode(dataPayload: event.data) {
-                    switch streamEvent {
-                    case .started:
+                let (streamEvents, termination) = try codec.decodeChunk(dataPayload: event.data)
+                for streamEvent in streamEvents {
+                    if case .started = streamEvent {
                         guard !startedForwarded else { continue }
                         startedForwarded = true
-                        continuation.yield(streamEvent)
-                    case .finished(let reason, let usage):
-                        terminal.absorb(reason, usage)
-                    default:
-                        continuation.yield(streamEvent)
                     }
+                    continuation.yield(streamEvent)
                 }
+                terminal.absorb(termination)
             }
         }
 
@@ -432,7 +531,10 @@ public actor GatewayClient: LLMStreaming {
         do {
             for event in try codec.decodeComplete(Data(body)) {
                 if case .finished(let reason, let usage) = event {
-                    terminal.absorb(reason, usage)
+                    // A whole non-streamed body is the complete answer, so its
+                    // `finish_reason` (defaulted to `.stop` by the codec when the
+                    // provider omits it) IS an observation, not a placeholder.
+                    terminal.absorb(.init(reason: reason, usage: usage))
                 } else {
                     continuation.yield(event)
                 }
@@ -496,13 +598,14 @@ public actor GatewayClient: LLMStreaming {
     private static func message(from body: Data, contentType: String?) -> String {
         let text = String(decoding: body, as: UTF8.self)
         if (contentType ?? "").lowercased().contains("json") || text.hasPrefix("{") {
-            if let value = try? JSONDecoder().decode(JSONValue.self, from: body),
-               case .object(let root) = value {
-                if case .array(let errors)? = root["errors"], case .object(let first)? = errors.first,
-                   let message = first["message"]?.stringValue {
+            if let root = (try? JSONDecoder().decode(JSONValue.self, from: body))?.objectValue {
+                // Cloudflare's `errors[]`, then the OpenAI `error.message`, then
+                // the two bare-string shapes some providers emit.
+                if let message = root["errors"]?.arrayValue?.first?
+                    .objectValue?["message"]?.stringValue {
                     return message
                 }
-                if case .object(let error)? = root["error"], let message = error["message"]?.stringValue {
+                if let message = root["error"]?.objectValue?["message"]?.stringValue {
                     return message
                 }
                 if let message = root["error"]?.stringValue { return message }

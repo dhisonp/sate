@@ -53,8 +53,24 @@ public enum JSONValue: Codable, Hashable, Sendable {
         return nil
     }
 
+    public var objectValue: [String: JSONValue]? {
+        if case .object(let value) = self { return value }
+        return nil
+    }
+
+    public var arrayValue: [JSONValue]? {
+        if case .array(let value) = self { return value }
+        return nil
+    }
+
+    /// Every integer this project reads — usage counts, tool-call `index`, error
+    /// `code` — is mined from untrusted provider JSON, and JSON has no integer
+    /// type: `1e30` and `9223372036854775808` both decode to `.number`. The
+    /// trapping `Int(_:)` conversion would ABORT THE PROCESS mid-stream on either
+    /// one, losing everything since the last checkpoint, so an out-of-range value
+    /// is "no integer here" instead.
     public var intValue: Int? {
-        if case .number(let value) = self { return Int(value) }
+        if case .number(let value) = self { return Int(exactly: value.rounded()) }
         return nil
     }
 }

@@ -114,6 +114,40 @@ struct JSONLFileTests {
         }
     }
 
+    @Test("a short write is rolled back so it cannot fuse onto the next append")
+    func shortWriteRollsBack() throws {
+        try withTempDirectory { root in
+            let url = root.appending(path: "log.jsonl")
+            let file = JSONLFile(url: url)
+            try file.append(line("first"), durable: true)
+            let sizeBefore = try #require(
+                (try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int))
+
+            JSONLFile.shortWriteInjector = { target, payload in
+                target == url ? payload.count / 2 : nil
+            }
+            defer { JSONLFile.shortWriteInjector = nil }
+            #expect(throws: JSONLFile.Failure.self) {
+                try file.append(line("truncated-by-ENOSPC"), durable: true)
+            }
+            JSONLFile.shortWriteInjector = nil
+
+            // The fragment must be gone, not parked at EOF: `truncatePartialTail`
+            // runs at most once per file per process, so by now that budget is
+            // spent and a surviving fragment would fuse onto the next append —
+            // turning two entries into one unparseable line that `load` drops.
+            let sizeAfter = try #require(
+                (try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int))
+            #expect(sizeAfter == sizeBefore)
+            #expect(try file.readLines().hadPartialTail == false)
+
+            try file.append(line("second"), durable: true)
+            let (lines, partial) = try file.readLines()
+            #expect(lines.map { String(decoding: $0, as: UTF8.self) } == ["first", "second"])
+            #expect(partial == false)
+        }
+    }
+
     @Test("truncatePartialTail is a no-op on a well-formed or absent file")
     func truncateIsNoOpWhenClean() throws {
         try withTempDirectory { root in

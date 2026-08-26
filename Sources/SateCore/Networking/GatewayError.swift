@@ -39,13 +39,6 @@ public enum GatewayError: Error, Hashable, Sendable {
             return false
         }
     }
-
-    public var bytesReceived: Int {
-        switch self {
-        case .connectionLost(let count), .idleTimeout(let count): return count
-        default: return 0
-        }
-    }
 }
 
 extension GatewayError {

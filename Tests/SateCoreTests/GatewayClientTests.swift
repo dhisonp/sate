@@ -17,6 +17,9 @@ struct StubResponse: Sendable {
     /// After the chunks, leave the response open instead of finishing — for
     /// cancellation tests. Nothing blocks: the loader simply never completes.
     var hang: Bool = false
+    /// Never deliver even the response head. Models a send made with no route to
+    /// the network while `waitsForConnectivity` is swallowing the URLError.
+    var stall: Bool = false
 
     static func sse(_ chunks: [String], status: Int = 200) -> StubResponse {
         StubResponse(status: status, chunks: chunks.map { Data($0.utf8) })
@@ -85,6 +88,9 @@ final class StubURLProtocol: URLProtocol {
             client.urlProtocol(self, didFailWithError: URLError(failure))
             return
         }
+        // Return without ever calling the client back: the task simply hangs, as
+        // it does when URLSession is waiting for connectivity that never arrives.
+        if stub.stall { return }
         let response = HTTPURLResponse(
             url: request.url!, statusCode: stub.status, httpVersion: "HTTP/1.1",
             headerFields: stub.headers)!
@@ -255,6 +261,80 @@ struct GatewayClientTests {
         #expect(trace?.retried == false)
     }
 
+    // MARK: - Finish reason vs. usage trailer
+
+    private static let sampleUsage = Usage(promptTokens: 9, completionTokens: 2, totalTokens: 11)
+
+    private func finished(_ events: [StreamEvent]) throws -> (FinishReason, Usage?) {
+        let terminal = events.compactMap { event -> (FinishReason, Usage?)? in
+            if case .finished(let reason, let usage) = event { return (reason, usage) }
+            return nil
+        }
+        #expect(terminal.count == 1, "exactly one terminal event must reach the caller")
+        return try #require(terminal.first)
+    }
+
+    @Test("A usage trailer BEFORE the finish chunk does not mask finish_reason")
+    func usageTrailerDoesNotMaskFinishReason() async throws {
+        // The trailer says how much was billed, never why the answer ended. When
+        // it arrived first, the reason was pinned to `.stop`: a truncated answer
+        // persisted as a clean stop, the user was never told it was cut off, and
+        // "Continue" never appeared.
+        let client = makeClient { _ in
+            .sse([
+                "data: {\"id\":\"r\",\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n",
+                "data: {\"id\":\"r\",\"choices\":[],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":2,\"total_tokens\":11}}\n\n",
+                "data: {\"id\":\"r\",\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\n",
+                "data: [DONE]\n\n",
+            ])
+        }
+        let (events, error) = await collect(client.stream(Self.request))
+        #expect(error == nil)
+        let (reason, usage) = try finished(events)
+        #expect(reason == .length)
+        // The trailer's usage must still survive into the terminal event.
+        #expect(usage == Self.sampleUsage)
+    }
+
+    @Test("A usage trailer AFTER the finish chunk still attaches its usage")
+    func usageTrailerAfterFinishReason() async throws {
+        let client = makeClient { _ in
+            .sse([
+                "data: {\"id\":\"r\",\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n",
+                "data: {\"id\":\"r\",\"choices\":[{\"delta\":{},\"finish_reason\":\"content_filter\"}]}\n\n",
+                "data: {\"id\":\"r\",\"choices\":[],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":2,\"total_tokens\":11}}\n\n",
+                "data: [DONE]\n\n",
+            ])
+        }
+        let (events, error) = await collect(client.stream(Self.request))
+        #expect(error == nil)
+        let (reason, usage) = try finished(events)
+        #expect(reason == .contentFilter)
+        #expect(usage == Self.sampleUsage)
+    }
+
+    @Test("Cumulative usage on every chunk still ends with the observed reason")
+    func cumulativeUsageDoesNotPinTheReason() async throws {
+        // Gemini through the compat translation reports usage on EVERY chunk, so
+        // the placeholder reason used to win on the very first delta and pin every
+        // single generation to `.stop`.
+        let client = makeClient { _ in
+            .sse([
+                "data: {\"id\":\"r\",\"choices\":[{\"delta\":{\"content\":\"a\"}}],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":1,\"total_tokens\":10}}\n\n",
+                "data: {\"id\":\"r\",\"choices\":[{\"delta\":{\"content\":\"b\"}}],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":2,\"total_tokens\":11}}\n\n",
+                "data: {\"id\":\"r\",\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":2,\"total_tokens\":11}}\n\n",
+                "data: [DONE]\n\n",
+            ])
+        }
+        let (events, error) = await collect(client.stream(Self.request))
+        #expect(error == nil)
+        #expect(events.filter { if case .textDelta = $0 { return true } else { return false } }.count == 2)
+        let (reason, usage) = try finished(events)
+        #expect(reason == .length)
+        // Last usage wins: a cumulative count grows chunk by chunk.
+        #expect(usage == Self.sampleUsage)
+    }
+
     @Test("Gateway response headers land in the trace")
     func traceHeaders() async throws {
         let client = makeClient { _ in
@@ -351,6 +431,31 @@ struct GatewayClientTests {
         let idle = makeClient { _ in StubResponse(failure: .timedOut) }
         #expect(try gatewayError(await collect(idle.stream(Self.request)).error)
             == .idleTimeout(bytesReceived: 0))
+    }
+
+    @Test("A connect that never completes surfaces as offline within the budget")
+    func connectivityBudgetSurfacesAsOffline() async throws {
+        // `waitsForConnectivity` suppresses URLError.notConnectedToInternet, so an
+        // offline send used to block until `timeoutIntervalForResource` (900 s) and
+        // then arrive as a RETRIABLE `.idleTimeout` — half an hour of frozen
+        // "Sending…" and "The model stopped responding." R1.1 budgets 10 s; the
+        // test uses 150 ms of it.
+        let configuration = GatewayConfiguration(
+            accountID: "acct-1",
+            token: "secret-token",
+            retryDelayMilliseconds: 10,
+            connectivityTimeout: 0.15)
+        let client = makeClient(configuration) { _ in StubResponse(stall: true) }
+
+        let started = Date()
+        let (events, error) = await collect(client.stream(Self.request))
+        let elapsed = Date().timeIntervalSince(started)
+
+        #expect(events.isEmpty)
+        #expect(try gatewayError(error) == .offline)
+        // One retry is allowed before the first byte, so two budgets plus the
+        // retry delay — still nowhere near the resource timeout.
+        #expect(elapsed < 5, "took \(elapsed)s")
     }
 
     @Test("Cancelling the consuming task tears the request down promptly")

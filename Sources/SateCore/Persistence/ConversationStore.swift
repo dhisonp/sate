@@ -144,7 +144,7 @@ public actor ConversationStore {
     public func create(title: String, model: String) throws -> ConversationHeader {
         let header = ConversationHeader(title: title, model: model)
         let target = file(header.conversationID)
-        try target.append(try encoder.encode(SessionEntry.header(header)), durable: true)
+        try append(.header(header), to: target, id: header.conversationID, durable: true)
         // A brand-new file has no history, so nothing can need repair.
         repaired.insert(header.conversationID)
 
@@ -226,7 +226,7 @@ public actor ConversationStore {
         }
 
         // A transcript whose leaf line was lost still has to render something.
-        if leafID == nil || messagesByID[leafID!] == nil {
+        if leafID.flatMap({ messagesByID[$0] }) == nil {
             leafID = appendOrder.max { $0.value < $1.value }?.key
         }
 
@@ -241,10 +241,21 @@ public actor ConversationStore {
 
     /// Commits one message and advances the leaf to it.
     ///
-    /// Exactly one `F_FULLFSYNC`, on the leaf line: the two lines land in order
-    /// on the same file descriptor, so syncing the second one also commits the
-    /// first, and a crash between them leaves a message with a stale leaf — which
-    /// `load` renders correctly — rather than a leaf pointing at nothing.
+    /// Exactly one `F_FULLFSYNC`, and it is on the MESSAGE line, not the leaf.
+    /// The sidecar is dropped the instant that line is on the platter, because
+    /// the two failure modes are not symmetric:
+    ///
+    ///   * leaf line lost (crash, or an ENOSPC / `F_FULLFSYNC` failure on the
+    ///     second append) → a message with a stale leaf, which `load` already
+    ///     renders correctly by falling back to the last appended message;
+    ///   * sidecar outliving a landed message line → `recoverCheckpoints()` on
+    ///     the next launch mints a SECOND message with the same text and a fresh
+    ///     UUID. Dedup is by `message.id`, so nothing catches it and the answer
+    ///     is simply there twice, forever.
+    ///
+    /// So the discard goes between the two appends (still the same actor turn as
+    /// the commit, per R2.4), and the durable barrier moves to the line whose
+    /// loss would be unrecoverable.
     public func append(_ message: Message, to id: UUID) throws {
         let target = file(id)
         guard target.exists() else { throw ConversationStoreError.notFound(id) }
@@ -252,15 +263,11 @@ public actor ConversationStore {
         try repairIfNeeded(id, target)
         var summary = try currentSummary(id)
 
-        try target.append(try encoder.encode(SessionEntry.message(message)), durable: false)
-        try target.append(
-            try encoder.encode(SessionEntry.leaf(id: message.id, timestamp: message.timestamp)),
-            durable: true)
-
-        // Same actor turn as the commit (R2.4). If the sidecar outlived this
-        // call, `recoverCheckpoints()` on the next launch would append a second
-        // copy of the text we just committed.
+        try append(.message(message), to: target, id: id, durable: true)
         discardCheckpointFile(id)
+        try append(
+            .leaf(id: message.id, timestamp: message.timestamp),
+            to: target, id: id, durable: false)
 
         summary.messageCount += 1
         summary.updatedAt = message.timestamp
@@ -277,8 +284,7 @@ public actor ConversationStore {
         var summary = try currentSummary(id)
 
         let now = Date()
-        try target.append(
-            try encoder.encode(SessionEntry.leaf(id: messageID, timestamp: now)), durable: true)
+        try append(.leaf(id: messageID, timestamp: now), to: target, id: id, durable: true)
 
         summary.updatedAt = now
         try index.upsert(summary)
@@ -293,9 +299,8 @@ public actor ConversationStore {
         var summary = try currentSummary(id)
 
         let now = Date()
-        try target.append(
-            try encoder.encode(SessionEntry.update(title: title, model: model, timestamp: now)),
-            durable: true)
+        try append(
+            .update(title: title, model: model, timestamp: now), to: target, id: id, durable: true)
 
         if let title { summary.title = title }
         if let model { summary.model = model }
@@ -386,6 +391,25 @@ public actor ConversationStore {
     }
 
     // MARK: Internals
+
+    /// Encodes and appends one entry, re-arming this conversation's tail repair if
+    /// the write fails.
+    ///
+    /// `JSONLFile` rolls a short write back off the end of the file, but a write
+    /// that fails for any other reason may still have left something at EOF, and
+    /// `repairIfNeeded` only fires once per file per process. Re-arming costs one
+    /// extra read on the next write to this conversation and removes the
+    /// fused-line failure mode entirely.
+    private func append(
+        _ entry: SessionEntry, to target: JSONLFile, id: UUID, durable: Bool
+    ) throws {
+        do {
+            try target.append(try encoder.encode(entry), durable: durable)
+        } catch {
+            repaired.remove(id)
+            throw error
+        }
+    }
 
     private func repairIfNeeded(_ id: UUID, _ target: JSONLFile) throws {
         guard !repaired.contains(id) else { return }

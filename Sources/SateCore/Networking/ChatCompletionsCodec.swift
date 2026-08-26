@@ -44,12 +44,15 @@ public struct ChatCompletionRequest: Sendable, Hashable {
 /// **Finish/usage contract with `GatewayClient`** — the codec is stateless, so it
 /// cannot know what an earlier chunk said. It therefore reports every terminal
 /// signal it sees:
-///   * a chunk carrying `choices[0].finish_reason` → `.finished(reason, usage?)`
+///   * a chunk carrying `choices[0].finish_reason` → an OBSERVED reason
 ///   * the `stream_options.include_usage` trailer (empty `choices` + `usage`) →
-///     `.finished(.stop, usage)` — `.stop` is a placeholder, not an observation
-/// `GatewayClient` coalesces these into exactly one terminal event: it keeps the
-/// FIRST reason it saw and attaches the LAST usage it saw. Callers that use the
-/// codec directly must do the same.
+///     usage only, with NO reason: the trailer says how much was billed, never
+///     why the generation ended
+/// `GatewayClient` coalesces these into exactly one terminal event via
+/// `decodeChunk`, which keeps the two apart. `decode(dataPayload:)` flattens the
+/// same information into `StreamEvent`s for callers that only need the shape;
+/// there a reason-less trailer has to borrow `.stop` as a placeholder, so a
+/// caller coalescing those events itself must let a later observed reason win.
 public struct ChatCompletionsCodec: Sendable {
     /// Conservative ceiling used whenever the caller supplies no `maxTokens`.
     public static let defaultMaxTokens = 4096
@@ -75,6 +78,12 @@ public struct ChatCompletionsCodec: Sendable {
             body["stream_options"] = .object(["include_usage": .bool(true)])
         }
         for (key, value) in request.extra where !Self.reservedKeys.contains(key) {
+            // A provider-specific `max_tokens` tune is legitimate, but `null`, `0`
+            // or a negative value would REMOVE the only hard bound on the
+            // worst-case bill (a client-side cancel does not reliably abort the
+            // upstream generation). A nonsensical override is dropped so the
+            // configured ceiling above survives.
+            if key == "max_tokens", !Self.isUsableTokenLimit(value) { continue }
             body[key] = value
         }
         body["model"] = .string(request.model)
@@ -88,6 +97,13 @@ public struct ChatCompletionsCodec: Sendable {
         // JSONSerialization (rather than JSONEncoder) so integral numbers encode as
         // `4096` and not `4096.0`; some providers reject a float `max_tokens`.
         return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    }
+
+    /// Only a strictly positive number is a bound; everything else (null, a
+    /// string, 0, a negative) is not.
+    private static func isUsableTokenLimit(_ value: JSONValue) -> Bool {
+        guard let number = value.doubleValue else { return false }
+        return number >= 1
     }
 
     private func encodeMessages(_ request: ChatCompletionRequest) -> [JSONValue] {
@@ -131,11 +147,33 @@ public struct ChatCompletionsCodec: Sendable {
 
     // MARK: - Decoding
 
-    /// Decode one SSE `data:` payload into 0..n events. `[DONE]` and blank
-    /// payloads decode to nothing — termination is the client's business.
-    public func decode(dataPayload: String) throws -> [StreamEvent] {
+    /// What one chunk said about termination.
+    ///
+    /// `reason` is non-nil ONLY when the chunk actually carried `finish_reason`.
+    /// Keeping that apart from `usage` is the whole point: a usage trailer that
+    /// arrives BEFORE the finish chunk — which is every chunk for a provider
+    /// streaming cumulative usage, e.g. Gemini through the compat translation —
+    /// would otherwise pin the generation to `.stop` and silently swallow a real
+    /// `length` or `content_filter`. The user would never be told the answer was
+    /// cut off, and "Continue" would never appear.
+    public struct ChunkTermination: Hashable, Sendable {
+        public var reason: FinishReason?
+        public var usage: Usage?
+
+        public init(reason: FinishReason? = nil, usage: Usage? = nil) {
+            self.reason = reason
+            self.usage = usage
+        }
+    }
+
+    /// Decode one SSE `data:` payload into 0..n non-terminal events plus what the
+    /// chunk said about termination. `[DONE]` and blank payloads decode to
+    /// nothing — termination is the client's business.
+    public func decodeChunk(
+        dataPayload: String
+    ) throws -> (events: [StreamEvent], termination: ChunkTermination) {
         let trimmed = dataPayload.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty || trimmed == "[DONE]" { return [] }
+        if trimmed.isEmpty || trimmed == "[DONE]" { return ([], ChunkTermination()) }
         let root = try Self.object(from: Data(trimmed.utf8), context: "stream chunk")
         try Self.throwIfError(root)
 
@@ -146,20 +184,27 @@ public struct ChatCompletionsCodec: Sendable {
         // The `include_usage` trailer carries an EMPTY choices array — indexing it
         // blindly is the classic crash here.
         guard let choice = Self.fields(choices.first) else {
-            if let usage { events.append(.finished(reason: .stop, usage: usage)) }
-            return events
+            return (events, ChunkTermination(usage: usage))
         }
 
         if let delta = Self.fields(choice["delta"]) {
             events.append(contentsOf: Self.deltaEvents(delta))
         }
-        if let reason = choice["finish_reason"]?.stringValue {
-            events.append(.finished(reason: FinishReason(rawValue: reason), usage: usage))
-        } else if let usage {
-            // A provider that puts usage on the same chunk as the last delta.
-            events.append(.finished(reason: .stop, usage: usage))
-        }
-        return events
+        let reason = choice["finish_reason"]?.stringValue.map(FinishReason.init(rawValue:))
+        return (events, ChunkTermination(reason: reason, usage: usage))
+    }
+
+    /// Flattened form of `decodeChunk` for callers that only speak `StreamEvent`.
+    ///
+    /// A chunk that carried usage but no `finish_reason` has to borrow `.stop`
+    /// here, because `StreamEvent.finished` has no way to say "billed, reason
+    /// unknown". Callers that coalesce these themselves must let a later observed
+    /// reason overwrite that placeholder — or use `decodeChunk`, which never
+    /// invents a reason in the first place.
+    public func decode(dataPayload: String) throws -> [StreamEvent] {
+        let (events, termination) = try decodeChunk(dataPayload: dataPayload)
+        guard termination.reason != nil || termination.usage != nil else { return events }
+        return events + [.finished(reason: termination.reason ?? .stop, usage: termination.usage)]
     }
 
     /// Decode a complete, non-streamed `application/json` body. Some models and
@@ -249,22 +294,16 @@ public struct ChatCompletionsCodec: Sendable {
         guard let object = fields(value) else { return nil }
         let prompt = object["prompt_tokens"]?.intValue ?? 0
         let completion = object["completion_tokens"]?.intValue ?? 0
-        let total = object["total_tokens"]?.intValue ?? (prompt + completion)
+        let total = object["total_tokens"]?.intValue ?? Usage.clampedSum(prompt, completion)
         return Usage(promptTokens: prompt, completionTokens: completion, totalTokens: total)
     }
 
 
-    // Local accessors instead of a shared `JSONValue` extension: this file must not
-    // add members to a type other slices of the package also extend.
-    private static func fields(_ value: JSONValue?) -> [String: JSONValue]? {
-        if case .object(let object) = value { return object }
-        return nil
-    }
+    // Optional-friendly aliases: every call site here starts from a `JSONValue?`
+    // dictionary lookup, so these keep the mining code one line per hop.
+    private static func fields(_ value: JSONValue?) -> [String: JSONValue]? { value?.objectValue }
 
-    private static func list(_ value: JSONValue?) -> [JSONValue]? {
-        if case .array(let array) = value { return array }
-        return nil
-    }
+    private static func list(_ value: JSONValue?) -> [JSONValue]? { value?.arrayValue }
 
     private static func object(from data: Data, context: String) throws -> [String: JSONValue] {
         guard let value = try? JSONDecoder().decode(JSONValue.self, from: data),

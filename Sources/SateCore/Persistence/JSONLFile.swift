@@ -24,14 +24,25 @@ public struct JSONLFile: Sendable {
         case writeFailed(Int32)
         /// `write(2)` returned fewer bytes than requested. We deliberately do
         /// *not* loop to finish the write: a second `write(2)` would no longer be
-        /// atomic against a concurrent appender. The short line is left as a
-        /// partial tail for `truncatePartialTail()` to discard.
+        /// atomic against a concurrent appender. The fragment is rolled back off
+        /// the end of the file instead — see `append`.
         case shortWrite(expected: Int, actual: Int)
         /// `fcntl(F_FULLFSYNC)` failed; carries `errno`.
         case syncFailed(Int32)
         /// `ftruncate(2)` failed; carries `errno`.
         case truncateFailed(Int32)
     }
+
+    /// Test seam: when set, forces `append` to behave as if `write(2)` had
+    /// returned this many bytes for that (url, payload).
+    ///
+    /// The failure modes the write discipline exists for — a short write, and a
+    /// second line of a commit failing after the first landed — need ENOSPC or an
+    /// `RLIMIT_FSIZE` trip to reproduce, and both of those are process-global and
+    /// therefore unusable from a parallel test suite. `internal`, so only
+    /// `@testable` code can reach it; nothing in the app can, and production never
+    /// sets it (the read is one nil check per line written).
+    nonisolated(unsafe) internal static var shortWriteInjector: (@Sendable (URL, Data) -> Int?)?
 
     // MARK: - Appending
 
@@ -41,8 +52,9 @@ public struct JSONLFile: Sendable {
     ///   returning. `FileHandle.synchronize()` / `fsync(2)` only flush to the
     ///   drive's write cache on APFS, which a power loss can still discard;
     ///   `F_FULLFSYNC` is the only barrier that actually reaches the platter.
-    ///   Callers pass `false` for intermediate lines of a multi-line commit and
-    ///   `true` once, on the last one.
+    ///   A multi-line commit syncs once, on the line whose loss would be
+    ///   unrecoverable — not necessarily the last one; see
+    ///   `ConversationStore.append`.
     public func append(_ line: Data, durable: Bool) throws {
         try createParentDirectoryIfNeeded()
 
@@ -58,12 +70,31 @@ public struct JSONLFile: Sendable {
 
         applyFileProtection()
 
-        let written = payload.withUnsafeBytes { buffer -> Int in
+        // Where this line will land. With O_APPEND the kernel picks the offset, so
+        // this is only a rollback anchor — and it is exact under the single-writer
+        // discipline of R2.5 (one actor owns every write to a transcript).
+        let start = lseek(fd, 0, SEEK_END)
+
+        var written = payload.withUnsafeBytes { buffer -> Int in
             guard let base = buffer.baseAddress else { return 0 }
             return write(fd, base, buffer.count)
         }
+        if let forced = Self.shortWriteInjector?(url, payload), written == payload.count {
+            // Leave the file in exactly the state a real short write leaves it in,
+            // then fall into the rollback below.
+            if start >= 0 { _ = ftruncate(fd, start + off_t(forced)) }
+            written = forced
+        }
         guard written >= 0 else { throw Failure.writeFailed(errno) }
         guard written == payload.count else {
+            // Roll the fragment back off the end of the file. Leaving it there
+            // would be silently destructive: the once-per-file-per-process
+            // `truncatePartialTail()` budget is already spent by the time a short
+            // write can happen, so the NEXT append fuses onto the fragment and
+            // both entries become one unparseable line that `load` drops via
+            // `try?` — including, potentially, a `leaf` line, which regresses the
+            // branch pointer with no error anywhere.
+            if start >= 0 { _ = ftruncate(fd, start) }
             throw Failure.shortWrite(expected: payload.count, actual: written)
         }
 

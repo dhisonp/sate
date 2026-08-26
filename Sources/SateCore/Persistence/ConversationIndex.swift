@@ -74,10 +74,15 @@ final class ConversationIndex {
 
     private func loadIfNeeded() throws {
         guard !isLoaded else { return }
+        // `uniquingKeysWith`, never `uniqueKeysWithValues`: duplicate conversation
+        // ids are exactly the state this type is supposed to self-heal from — an
+        // iCloud/Files conflict copy (`<uuid> 2.jsonl`) or a restore leaves two
+        // files carrying the same `header.conversationID`, and trapping here would
+        // crash the conversation-list screen, i.e. the app would not boot.
         if let cached = readIndexFile() {
-            byID = Dictionary(uniqueKeysWithValues: cached.map { ($0.id, $0) })
+            byID = Dictionary(cached.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
         } else {
-            byID = Dictionary(uniqueKeysWithValues: try rebuild().map { ($0.id, $0) })
+            byID = Dictionary(try rebuild().map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
             // Persist the repair so the next launch takes the fast path.
             try? persist()
         }
@@ -115,11 +120,7 @@ final class ConversationIndex {
             includingPropertiesForKeys: [.contentModificationDateKey],
             options: [.skipsHiddenFiles])
 
-        var result: [ConversationSummary] = []
-        for url in contents where url.pathExtension == "jsonl" {
-            if let summary = summarize(url) { result.append(summary) }
-        }
-        return result
+        return contents.filter { $0.pathExtension == "jsonl" }.compactMap(summarize)
     }
 
     private func summarize(_ url: URL) -> ConversationSummary? {

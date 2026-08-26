@@ -247,12 +247,10 @@ struct ConversationStoreTests {
         #expect(message.text == "partial answ")
         #expect(message.reasoning == "thinking")
         #expect(message.interrupted)
-        // Asserted on `rawValue`, not `== .truncated`: `FinishReason.init(rawValue:)`
-        // in Model/Message.swift has no "truncated" case, so a persisted
-        // `.truncated` decodes as `.unknown("truncated")`. Behaviour is unaffected
-        // (same rawValue, still `!isClean`), but equality against `.truncated`
-        // fails after a round-trip. Fix belongs in the contract type, not here.
-        #expect(message.finishReason?.rawValue == "truncated")
+        // `.truncated` round-trips through persistence: FinishReason.init(rawValue:)
+        // has an explicit "truncated" case, so a recovered interrupted message
+        // decodes back to `.truncated` rather than `.unknown("truncated")`.
+        #expect(message.finishReason == .truncated)
         #expect(message.finishReason?.isClean == false)
         #expect(message.parentID == user.id)
         #expect(snapshot.leafID == message.id)
@@ -287,6 +285,53 @@ struct ConversationStoreTests {
         #expect(snapshot.currentBranch.map(\.text) == ["q", "partial answer, complete"])
     }
 
+    @Test("a leaf append that fails after the message landed leaves no duplicate")
+    func noDuplicateAfterFailedLeafWrite() async throws {
+        let dir = makeDirectory()
+        defer { cleanUp(dir) }
+        let store = ConversationStore(directory: dir)
+        let id = try await store.create(title: "T", model: "m").conversationID
+        let user = Message.user("q")
+        try await store.append(user, to: id)
+
+        try await store.checkpoint(
+            conversationID: id, parentID: user.id, text: "the answer", reasoning: "", model: "m")
+        let final = Message(
+            parentID: user.id, role: .assistant, content: [.text("the answer")],
+            finishReason: .stop)
+
+        // ENOSPC (or an F_FULLFSYNC refusal) on the SECOND line of the commit,
+        // after the message line is already on disk. Scoped to this test's file.
+        let transcript = transcriptURL(dir, id)
+        JSONLFile.shortWriteInjector = { url, payload in
+            guard url == transcript,
+                  String(decoding: payload, as: UTF8.self).contains("\"type\":\"leaf\"")
+            else { return nil }
+            return 0
+        }
+        defer { JSONLFile.shortWriteInjector = nil }
+
+        await #expect(throws: JSONLFile.Failure.self) { try await store.append(final, to: id) }
+        JSONLFile.shortWriteInjector = nil
+
+        // The sidecar must be gone even though the commit failed: the message line
+        // landed, so recovering the checkpoint would append the SAME text under a
+        // fresh UUID, and dedup is by `message.id` — nothing would ever catch it.
+        let relaunched = ConversationStore(directory: dir)
+        #expect(try await relaunched.recoverCheckpoints().isEmpty)
+
+        let snapshot = try await relaunched.load(id)
+        let assistants = snapshot.messagesByID.values.filter { $0.role == .assistant }
+        #expect(assistants.count == 1)
+        #expect(snapshot.messagesByID[final.id]?.text == "the answer")
+        // The documented degradation: the message is committed, the branch pointer
+        // is not, so the visible branch has simply not advanced yet. The message is
+        // still a child of `q` and one `setLeaf` away — unlike a duplicate, which
+        // nothing can undo.
+        #expect(snapshot.leafID == user.id)
+        #expect(snapshot.siblings(of: final.id) == [final.id])
+    }
+
     @Test("clearCheckpoint drops an abandoned draft")
     func clearCheckpoint() async throws {
         let dir = makeDirectory()
@@ -318,6 +363,37 @@ struct ConversationStoreTests {
     }
 
     // MARK: - Index self-healing
+
+    @Test("two transcripts carrying the same conversationID collapse to one row")
+    func duplicateConversationIDsDoNotCrashTheList() async throws {
+        let dir = makeDirectory()
+        defer { cleanUp(dir) }
+        let store = ConversationStore(directory: dir)
+        let id = try await store.create(title: "Alpha", model: "m").conversationID
+        try await store.append(.user("hi"), to: id)
+
+        // What an iCloud/Files conflict copy or a restore leaves behind: a second
+        // file whose header carries an id the directory already has. Rebuilding
+        // the index over it used to TRAP, so the conversation-list screen — the
+        // app's first screen — could not be drawn at all.
+        try FileManager.default.copyItem(
+            at: transcriptURL(dir, id), to: dir.appending(path: "\(id.uuidString) 2.jsonl"))
+        try FileManager.default.removeItem(at: dir.appending(path: "index.json"))
+
+        let rebuilt = ConversationStore(directory: dir)
+        let rows = try await rebuilt.list()
+        #expect(rows.count == 1)
+        #expect(rows.first?.id == id)
+
+        // Same again for the cached-index path: a hand-written or restored
+        // index.json that lists the id twice must load, not trap.
+        let encoder = SessionCoding.makeEncoder()
+        let row = try #require(rows.first)
+        try encoder.encode([row, row]).write(to: dir.appending(path: "index.json"))
+
+        let reloaded = ConversationStore(directory: dir)
+        #expect(try await reloaded.list().count == 1)
+    }
 
     @Test("a deleted index.json is rebuilt from the transcripts")
     func rebuildsMissingIndex() async throws {

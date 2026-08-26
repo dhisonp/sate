@@ -71,6 +71,22 @@ struct ChatCompletionsCodecTests {
         #expect(raw.contains("\"max_tokens\":100"))
     }
 
+    @Test("A positive extra max_tokens overrides, a useless one does not")
+    func maxTokensOverride() throws {
+        // A legitimate per-provider tune wins.
+        let tuned = try encodedBody(
+            ChatCompletionRequest(model: "m", maxTokens: 256, extra: ["max_tokens": .number(9000)]))
+        #expect(tuned["max_tokens"] as? Int == 9000)
+
+        // Anything that would leave the request UNBOUNDED is ignored: `max_tokens`
+        // is the only hard ceiling on a runaway generation's bill.
+        for useless: JSONValue in [.null, .number(0), .number(-1), .string("lots")] {
+            let body = try encodedBody(
+                ChatCompletionRequest(model: "m", maxTokens: 256, extra: ["max_tokens": useless]))
+            #expect(body["max_tokens"] as? Int == 256, "\(useless) must not remove the bound")
+        }
+    }
+
     @Test("stream_options only when streaming and enabled")
     func streamOptionsToggle() throws {
         let on = try encodedBody(ChatCompletionRequest(model: "m", includeUsage: true))
@@ -186,6 +202,37 @@ struct ChatCompletionsCodecTests {
             .started(responseID: "resp_1", model: nil),
             .finished(reason: .stop, usage: Usage(promptTokens: 11, completionTokens: 4, totalTokens: 15)),
         ])
+    }
+
+    @Test("Out-of-range numbers in a chunk are dropped, never trapped on")
+    func oversizedNumbersDoNotCrash() throws {
+        // Every one of these would abort the process through the trapping
+        // `Int(Double)` conversion, mid-stream, losing the whole answer since the
+        // last checkpoint — and all of them are one line of untrusted JSON away.
+        let events = try codec.decode(
+            dataPayload: #"{"choices":[],"usage":{"prompt_tokens":1e30,"completion_tokens":-1e30}}"#)
+        #expect(events == [.finished(reason: .stop, usage: Usage())])
+
+        let toolCall = try codec.decode(
+            dataPayload: #"{"choices":[{"delta":{"tool_calls":[{"index":1e30,"function":{"arguments":"{}"}}]}}]}"#)
+        #expect(toolCall == [.toolCallDelta(index: 0, id: nil, name: nil, argumentsFragment: "{}")])
+
+        // A NaN/huge `code` must degrade to "no code", not to a crash.
+        #expect(throws: GatewayError.inStreamError(code: nil, message: "boom")) {
+            try codec.decode(dataPayload: #"{"error":{"message":"boom","code":1e30}}"#)
+        }
+    }
+
+    @Test("A total_tokens that would overflow saturates instead of trapping")
+    func usageTotalSaturates() throws {
+        let huge = 9.0e18  // just under Int.max; two of them overflow Int.
+        let events = try codec.decode(
+            dataPayload: #"{"choices":[],"usage":{"prompt_tokens":\#(huge),"completion_tokens":\#(huge)}}"#)
+        let usage = try #require(events.compactMap { event -> Usage? in
+            if case .finished(_, let usage) = event { return usage }
+            return nil
+        }.first)
+        #expect(usage.totalTokens == Int.max)
     }
 
     @Test("Top-level error objects and strings throw inStreamError")

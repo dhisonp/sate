@@ -24,6 +24,14 @@ public struct Usage: Codable, Hashable, Sendable {
         promptTokens = try container.decodeIfPresent(Int.self, forKey: .promptTokens) ?? 0
         completionTokens = try container.decodeIfPresent(Int.self, forKey: .completionTokens) ?? 0
         totalTokens = try container.decodeIfPresent(Int.self, forKey: .totalTokens)
-            ?? (promptTokens + completionTokens)
+            ?? Usage.clampedSum(promptTokens, completionTokens)
+    }
+
+    /// Saturating addition. Both operands come from a provider we do not control,
+    /// and a trapping `+` would abort the whole process over a cosmetic total.
+    static func clampedSum(_ lhs: Int, _ rhs: Int) -> Int {
+        let (sum, overflowed) = lhs.addingReportingOverflow(rhs)
+        guard overflowed else { return sum }
+        return lhs > 0 ? Int.max : Int.min
     }
 }
