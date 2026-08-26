@@ -54,6 +54,9 @@ public struct BuiltContext: Sendable {
 /// Trimming is oldest-first at *pair* granularity: dropping a user turn without
 /// its assistant reply leaves the model reading a reply to nothing, which
 /// degrades answers and confuses providers that validate alternation.
+///
+/// Intermediate search rounds (tool calls + tool results) are evicted before
+/// dropping whole dialogue turns (R3.3) — search snippets age worse than dialogue.
 public struct ContextBuilder: Sendable {
     public var estimator: TokenEstimator
 
@@ -63,7 +66,7 @@ public struct ContextBuilder: Sendable {
 
     public func build(branch: [Message], systemPrompt: String?, window: ContextWindow) -> BuiltContext {
         let sanitized = sanitize(branch)
-        let groups = group(sanitized)
+        var groups = group(sanitized)
         let budget = window.effectiveBudgetTokens
 
         let systemCost: Int
@@ -77,15 +80,40 @@ public struct ContextBuilder: Sendable {
             systemCost = 0
         }
 
-        let costs = groups.map { group in
-            group.messages.reduce(0) { partial, message in
-                partial + estimator.estimate(characters: message.text.count, model: window.model)
+        func groupCost(_ g: MessageGroup) -> Int {
+            g.messages.reduce(0) { partial, message in
+                var chars = message.text.count
+                if let toolCalls = message.toolCalls {
+                    for call in toolCalls {
+                        chars += call.name.count + call.arguments.count
+                    }
+                }
+                return partial + estimator.estimate(characters: chars, model: window.model)
                     + TokenEstimator.perMessageOverheadTokens
             }
         }
 
+        var total = systemCost + groups.map(groupCost).reduce(0, +)
+
+        // Pass 1 (R3.3): Trim oldest search rounds from older, non-protected groups
+        // before dropping whole dialogue turns.
+        if total > budget {
+            for i in 0 ..< groups.count where !groups[i].isProtected {
+                let trimmed = trimSearchRounds(from: groups[i].messages)
+                if trimmed.count < groups[i].messages.count {
+                    let oldCost = groupCost(groups[i])
+                    groups[i].messages = trimmed
+                    let newCost = groupCost(groups[i])
+                    total -= (oldCost - newCost)
+                    if total <= budget {
+                        break
+                    }
+                }
+            }
+        }
+
+        // Pass 2: Drop oldest non-protected turn groups.
         var dropped = Set<Int>()
-        var total = systemCost + costs.reduce(0, +)
         var index = 0
         while total > budget, index < groups.count {
             // A protected group (the latest user turn, or a pinned system turn) is
@@ -93,7 +121,7 @@ public struct ContextBuilder: Sendable {
             // that names the real limit than silently answering without the question.
             if !groups[index].isProtected {
                 dropped.insert(index)
-                total -= costs[index]
+                total -= groupCost(groups[index])
             }
             index += 1
         }
@@ -157,22 +185,87 @@ public struct ContextBuilder: Sendable {
         var isProtected: Bool
     }
 
-    /// Drops empty assistant turns and strips reasoning.
+    /// Drops empty assistant turns, orphaned tools, and strips reasoning.
+    ///
+    /// Tool calls and tool responses are validated so that an assistant message
+    /// with `tool_calls` is never sent without its matching tool responses.
     private func sanitize(_ branch: [Message]) -> [Message] {
-        branch.compactMap { message in
-            // An assistant turn interrupted before its first token has no content;
-            // several backends 400 on empty assistant content, so it never ships.
-            if message.role == .assistant,
-               message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            {
-                return nil
+        var result: [Message] = []
+        var i = 0
+
+        while i < branch.count {
+            let message = branch[i]
+
+            if message.role == .assistant {
+                let hasToolCalls = !(message.toolCalls?.isEmpty ?? true)
+                let textEmpty = message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+                // Empty assistant turn with no tool calls is dropped.
+                if textEmpty, !hasToolCalls {
+                    i += 1
+                    continue
+                }
+
+                var copy = message
+                copy.reasoning = nil
+
+                if hasToolCalls {
+                    // Check if following messages contain corresponding tool results.
+                    var toolMessages: [Message] = []
+                    var j = i + 1
+                    while j < branch.count, branch[j].role == .tool {
+                        var toolCopy = branch[j]
+                        toolCopy.reasoning = nil
+                        toolMessages.append(toolCopy)
+                        j += 1
+                    }
+
+                    if toolMessages.isEmpty {
+                        // Orphaned assistant tool_calls with no tool responses.
+                        // If it has text, strip toolCalls; otherwise drop it.
+                        if !textEmpty {
+                            copy.toolCalls = nil
+                            result.append(copy)
+                        }
+                    } else {
+                        result.append(copy)
+                        result.append(contentsOf: toolMessages)
+                    }
+                    i = j
+                    continue
+                } else {
+                    result.append(copy)
+                    i += 1
+                    continue
+                }
+            } else if message.role == .tool {
+                // Orphaned tool message not preceded by assistant toolCalls is dropped.
+                i += 1
+                continue
+            } else {
+                var copy = message
+                copy.reasoning = nil
+                result.append(copy)
+                i += 1
             }
-            var copy = message
-            // Display-only: providers reject or ignore replayed reasoning, and it
-            // would inflate the estimate against text we do not send.
-            copy.reasoning = nil
-            return copy
         }
+
+        return result
+    }
+
+    /// Trims intermediate search rounds (assistant tool_call + tool responses)
+    /// from a turn group, keeping the user message and final assistant reply.
+    private func trimSearchRounds(from messages: [Message]) -> [Message] {
+        guard messages.count > 2 else { return messages }
+        guard let userMsg = messages.first, userMsg.role == .user else { return messages }
+        guard let lastAssistant = messages.last, lastAssistant.role == .assistant,
+              (lastAssistant.toolCalls?.isEmpty ?? true)
+        else {
+            return messages
+        }
+
+        // Return user turn + final assistant reply, shedding intermediate search rounds.
+        return [userMsg, lastAssistant]
     }
 
     /// Splits the branch into droppable units. A unit starts at each user message

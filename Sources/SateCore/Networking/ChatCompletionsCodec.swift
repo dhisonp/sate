@@ -1,5 +1,50 @@
 import Foundation
 
+/// A tool definition advertised in a completion request.
+public struct ToolDefinition: Codable, Hashable, Sendable {
+    public var type: String
+    public var function: FunctionDefinition
+
+    public struct FunctionDefinition: Codable, Hashable, Sendable {
+        public var name: String
+        public var description: String
+        public var parameters: JSONValue
+
+        public init(name: String, description: String, parameters: JSONValue) {
+            self.name = name
+            self.description = description
+            self.parameters = parameters
+        }
+    }
+
+    public init(type: String = "function", function: FunctionDefinition) {
+        self.type = type
+        self.function = function
+    }
+
+    public static let webSearch = ToolDefinition(
+        type: "function",
+        function: FunctionDefinition(
+            name: "web_search",
+            description: "Search the live web for current information, recent events, facts, dates, prices, versions, or verification.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "query": .object([
+                        "type": .string("string"),
+                        "description": .string("The search query string."),
+                    ]),
+                    "limit": .object([
+                        "type": .string("integer"),
+                        "description": .string("Maximum number of search results to return (1-8)."),
+                    ]),
+                ]),
+                "required": .array([.string("query")]),
+            ])
+        )
+    )
+}
+
 /// One outbound chat-completions call, in app vocabulary. The codec turns this
 /// into wire JSON; nothing here knows about Cloudflare or HTTP.
 public struct ChatCompletionRequest: Sendable, Hashable {
@@ -16,6 +61,10 @@ public struct ChatCompletionRequest: Sendable, Hashable {
     /// `stream_options: {include_usage: true}` is a per-model toggle because a
     /// few OpenAI-compat providers reject the field with a 400.
     public var includeUsage: Bool
+    /// Tools offered to the model (R2.2). Sent only when search/tools are enabled.
+    public var tools: [ToolDefinition]?
+    /// "auto" when tools are present, or nil/custom.
+    public var toolChoice: String?
     /// Provider passthrough, merged at the TOP LEVEL of the body.
     public var extra: [String: JSONValue]
 
@@ -26,6 +75,8 @@ public struct ChatCompletionRequest: Sendable, Hashable {
         maxTokens: Int? = ChatCompletionsCodec.defaultMaxTokens,
         temperature: Double? = nil,
         includeUsage: Bool = true,
+        tools: [ToolDefinition]? = nil,
+        toolChoice: String? = nil,
         extra: [String: JSONValue] = [:]
     ) {
         self.model = model
@@ -34,6 +85,8 @@ public struct ChatCompletionRequest: Sendable, Hashable {
         self.maxTokens = maxTokens
         self.temperature = temperature
         self.includeUsage = includeUsage
+        self.tools = tools
+        self.toolChoice = toolChoice
         self.extra = extra
     }
 }
@@ -77,6 +130,18 @@ public struct ChatCompletionsCodec: Sendable {
         if stream, request.includeUsage {
             body["stream_options"] = .object(["include_usage": .bool(true)])
         }
+        if let tools = request.tools, !tools.isEmpty {
+            if let toolsData = try? JSONEncoder().encode(tools),
+               let jsonValue = try? JSONDecoder().decode(JSONValue.self, from: toolsData)
+            {
+                body["tools"] = jsonValue
+            }
+            if let toolChoice = request.toolChoice {
+                body["tool_choice"] = .string(toolChoice)
+            } else {
+                body["tool_choice"] = .string("auto")
+            }
+        }
         for (key, value) in request.extra where !Self.reservedKeys.contains(key) {
             // A provider-specific `max_tokens` tune is legitimate, but `null`, `0`
             // or a negative value would REMOVE the only hard bound on the
@@ -115,14 +180,40 @@ public struct ChatCompletionsCodec: Sendable {
         }
         for message in request.messages {
             let text = message.text
-            // `reasoning`/`reasoning_content` is display-only: replaying it makes
-            // several backends 400, and it inflates the prompt for no benefit.
-            // An empty assistant turn (cancelled before the first token) is also a
-            // 400 on several backends, so it is dropped rather than sent blank.
-            if message.role == .assistant, text.isEmpty {
-                continue
+            switch message.role {
+            case .assistant:
+                if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
+                    var msgObj: [String: JSONValue] = ["role": .string("assistant")]
+                    if !text.isEmpty {
+                        msgObj["content"] = .string(text)
+                    }
+                    let callsArray: [JSONValue] = toolCalls.map { call in
+                        .object([
+                            "id": .string(call.id),
+                            "type": .string("function"),
+                            "function": .object([
+                                "name": .string(call.name),
+                                "arguments": .string(call.arguments),
+                            ]),
+                        ])
+                    }
+                    msgObj["tool_calls"] = .array(callsArray)
+                    out.append(.object(msgObj))
+                } else if !text.isEmpty {
+                    out.append(.object(["role": .string("assistant"), "content": .string(text)]))
+                }
+            case .tool:
+                var msgObj: [String: JSONValue] = [
+                    "role": .string("tool"),
+                    "content": .string(text),
+                ]
+                if let toolCallID = message.toolCallID {
+                    msgObj["tool_call_id"] = .string(toolCallID)
+                }
+                out.append(.object(msgObj))
+            case .user, .system:
+                out.append(.object(["role": .string(message.role.rawValue), "content": .string(text)]))
             }
-            out.append(.object(["role": .string(message.role.rawValue), "content": .string(text)]))
         }
         return out
     }

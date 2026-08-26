@@ -209,6 +209,71 @@ struct ContextBuilderTests {
     func rejectsUnrelatedErrors(message: String) {
         #expect(!ContextBuilder.isContextLengthError(message))
     }
+
+    @Test("Tool-call and tool-result pairs are kept together as an atomic unit")
+    func toolCallPairsPreserved() {
+        let user = userMessage(10)
+        let assistantCall = Message(
+            role: .assistant,
+            content: [],
+            toolCalls: [ToolCall(id: "c1", name: "web_search", arguments: #"{"query":"test"}"#)]
+        )
+        let toolRes = Message.tool("Search results", toolCallID: "c1")
+        let assistantFinal = Message(role: .assistant, content: [.text("Final answer")])
+        let latestUser = userMessage(10)
+
+        let window = ContextWindow(model: testModel, inputBudgetTokens: 100_000)
+        let built = builder.build(
+            branch: [user, assistantCall, toolRes, assistantFinal, latestUser],
+            systemPrompt: nil,
+            window: window
+        )
+
+        #expect(built.messages.count == 5)
+        #expect(built.messages[1].role == .assistant)
+        #expect(built.messages[1].toolCalls?.first?.id == "c1")
+        #expect(built.messages[2].role == .tool)
+        #expect(built.messages[2].toolCallID == "c1")
+    }
+
+    @Test("Intermediate search rounds are evicted before whole dialogue turns")
+    func searchRoundsEvictedBeforeDialogue() {
+        // Group 0: user turn with large search round + final answer.
+        let firstUser = userMessage(36)
+        let searchCall = Message(
+            role: .assistant,
+            content: [],
+            toolCalls: [ToolCall(id: "c0", name: "web_search", arguments: text(360, "q"))]
+        )
+        let searchResult = Message.tool(text(3600, "r"), toolCallID: "c0") // 1000 tokens of snippet
+        let firstAssistant = assistantMessage(36)
+
+        // Group 1: latest user turn.
+        let latestUser = userMessage(36)
+
+        // Budget fits dialogue (firstUser + firstAssistant + latestUser ~= 35 tokens) but NOT the 1000-token search snippet.
+        let window = ContextWindow(model: testModel, inputBudgetTokens: 200, reserveForOutputTokens: 50)
+        let built = builder.build(
+            branch: [firstUser, searchCall, searchResult, firstAssistant, latestUser],
+            systemPrompt: nil,
+            window: window
+        )
+
+        // firstUser, firstAssistant, latestUser survive; searchCall and searchResult were evicted first.
+        #expect(built.messages.map(\.id) == [firstUser.id, firstAssistant.id, latestUser.id])
+        #expect(built.droppedMessageCount == 2)
+    }
+
+    @Test("Orphaned tool responses without preceding assistant tool_calls are dropped")
+    func orphanedToolsDropped() {
+        let user = userMessage(10)
+        let orphanTool = Message.tool("orphan", toolCallID: "c_none")
+        let assistant = assistantMessage(10)
+        let window = ContextWindow(model: testModel)
+
+        let built = builder.build(branch: [user, orphanTool, assistant], systemPrompt: nil, window: window)
+        #expect(built.messages.map(\.id) == [user.id, assistant.id])
+    }
 }
 
 @Suite("SateSettings context configuration")
@@ -299,18 +364,25 @@ struct SateSettingsTests {
         #expect(window.reserveForOutputTokens == 8000)
     }
 
-    @Test("InMemorySecretStore stores and clears the token")
+    @Test("InMemorySecretStore stores and clears the token and search token")
     func inMemorySecretStore() throws {
         let store = InMemorySecretStore()
         let empty = try store.token()
         #expect(empty == nil)
+        #expect(try store.searchToken() == nil)
+
         try store.setToken("cf-token")
-        let stored = try store.token()
-        #expect(stored == "cf-token")
+        try store.setSearchToken("brave-key")
+        #expect(try store.token() == "cf-token")
+        #expect(try store.searchToken() == "brave-key")
+
         try store.setToken(nil)
-        let cleared = try store.token()
-        #expect(cleared == nil)
-        let seeded = try InMemorySecretStore(token: "seed").token()
-        #expect(seeded == "seed")
+        try store.setSearchToken(nil)
+        #expect(try store.token() == nil)
+        #expect(try store.searchToken() == nil)
+
+        let seeded = InMemorySecretStore(token: "seed-cf", searchToken: "seed-search")
+        #expect(try seeded.token() == "seed-cf")
+        #expect(try seeded.searchToken() == "seed-search")
     }
 }

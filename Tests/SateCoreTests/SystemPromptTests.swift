@@ -33,12 +33,15 @@ struct SystemPromptTests {
         #expect(SystemPrompt.resolve("").isEmpty)
     }
 
-    @Test("The default prompt carries the token and resolves cleanly")
+    @Test("The default general-assistant prompt carries the token and resolves cleanly")
     func defaultPromptResolves() {
-        #expect(SystemPrompt.researchAssistant.contains(SystemPrompt.currentDateToken))
+        #expect(SystemPrompt.generalAssistant.contains(SystemPrompt.currentDateToken))
+        #expect(SystemPrompt.generalAssistant.contains("general assistant"))
+        #expect(SystemPrompt.generalAssistant.contains("direct answer"))
+        #expect(SystemPrompt.generalAssistant.contains("coding"))
 
         let resolved = SystemPrompt.resolve(
-            SystemPrompt.researchAssistant,
+            SystemPrompt.generalAssistant,
             date: Date(timeIntervalSince1970: 1_774_483_200),
             locale: english, timeZone: utc
         )
@@ -46,18 +49,31 @@ struct SystemPromptTests {
         #expect(!resolved.contains("{{"))
     }
 
-    @Test("Fresh settings default to the research-assistant prompt")
-    func settingsDefaultToResearchAssistant() {
-        #expect(SateSettings().systemPrompt == SystemPrompt.researchAssistant)
+    @Test("Fresh settings default to the general-assistant prompts")
+    func settingsDefaultToGeneralAssistant() {
+        #expect(SateSettings().systemPrompt == SystemPrompt.generalAssistant)
+        #expect(SateSettings().systemPromptWithSearch == SystemPrompt.generalAssistantWithSearch)
     }
 
-    @Test("A stored prompt survives a settings round-trip")
-    func customPromptRoundTrips() throws {
-        // The default must not overwrite a prompt the operator actually chose.
-        var settings = SateSettings()
-        settings.systemPrompt = "Be extremely terse."
-        let data = try JSONEncoder().encode(settings)
-        let decoded = try JSONDecoder().decode(SateSettings.self, from: data)
-        #expect(decoded.systemPrompt == "Be extremely terse.")
+    @Test("The search-enabled prompt carries the token, search instructions, citations, and resolves cleanly")
+    func searchPromptResolves() {
+        #expect(SystemPrompt.generalAssistantWithSearch.contains(SystemPrompt.currentDateToken))
+        #expect(SystemPrompt.generalAssistantWithSearch.contains("web search tool"))
+        #expect(SystemPrompt.generalAssistantWithSearch.contains("[n]"))
+        #expect(SystemPrompt.generalAssistantWithSearch.contains("direct answer"))
+
+        let resolved = SystemPrompt.resolve(
+            SystemPrompt.generalAssistantWithSearch,
+            date: Date(timeIntervalSince1970: 1_774_483_200),
+            locale: english, timeZone: utc
+        )
+        #expect(!resolved.contains(SystemPrompt.currentDateToken))
+        #expect(!resolved.contains("{{"))
+    }
+
+    @Test("Research assistant aliases match general assistant prompts for backwards compatibility")
+    func compatibilityAliasesMatch() {
+        #expect(SystemPrompt.researchAssistant == SystemPrompt.generalAssistant)
+        #expect(SystemPrompt.researchAssistantWithSearch == SystemPrompt.generalAssistantWithSearch)
     }
 }

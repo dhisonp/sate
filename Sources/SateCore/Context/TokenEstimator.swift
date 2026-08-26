@@ -86,7 +86,13 @@ public struct TokenEstimator: Sendable, Codable {
         for message in messages {
             // `reasoning` is deliberately excluded: it is never replayed, so
             // counting it would inflate the budget against text we do not send.
-            total += estimate(characters: message.text.count, model: model) + Self.perMessageOverheadTokens
+            var chars = message.text.count
+            if let toolCalls = message.toolCalls {
+                for call in toolCalls {
+                    chars += call.name.count + call.arguments.count
+                }
+            }
+            total += estimate(characters: chars, model: model) + Self.perMessageOverheadTokens
         }
         return total
     }

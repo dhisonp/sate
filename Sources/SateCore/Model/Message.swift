@@ -76,6 +76,12 @@ public struct Message: Codable, Hashable, Sendable, Identifiable {
     /// connection, background expiry, crash recovery).
     public var interrupted: Bool
     public var logID: String?
+    /// Tool calls requested by an assistant turn (R2.3).
+    public var toolCalls: [ToolCall]?
+    /// The tool_call_id answered by a tool role turn.
+    public var toolCallID: String?
+    /// Search sources associated with this turn for citation rendering (R4.3).
+    public var sources: [SearchResult]?
 
     public init(
         id: UUID = UUID(),
@@ -88,7 +94,10 @@ public struct Message: Codable, Hashable, Sendable, Identifiable {
         finishReason: FinishReason? = nil,
         usage: Usage? = nil,
         interrupted: Bool = false,
-        logID: String? = nil
+        logID: String? = nil,
+        toolCalls: [ToolCall]? = nil,
+        toolCallID: String? = nil,
+        sources: [SearchResult]? = nil
     ) {
         self.id = id
         self.parentID = parentID
@@ -101,6 +110,9 @@ public struct Message: Codable, Hashable, Sendable, Identifiable {
         self.usage = usage
         self.interrupted = interrupted
         self.logID = logID
+        self.toolCalls = toolCalls
+        self.toolCallID = toolCallID
+        self.sources = sources
     }
 
     public var text: String {
@@ -109,5 +121,9 @@ public struct Message: Codable, Hashable, Sendable, Identifiable {
 
     public static func user(_ text: String, parentID: UUID? = nil) -> Message {
         Message(parentID: parentID, role: .user, content: [.text(text)])
+    }
+
+    public static func tool(_ text: String, toolCallID: String, parentID: UUID? = nil, sources: [SearchResult]? = nil) -> Message {
+        Message(parentID: parentID, role: .tool, content: [.text(text)], toolCallID: toolCallID, sources: sources)
     }
 }

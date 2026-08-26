@@ -1,6 +1,6 @@
 import Foundation
 
-/// Everything the user can configure except the API token, which lives in a
+/// Everything the user can configure except API tokens, which live in a
 /// `SecretStore`. Decoding uses `decodeIfPresent` for every key so a settings blob
 /// written by an older build (or an older blob read by a newer build with new
 /// fields) still loads instead of bricking the app into a fresh-install state.
@@ -14,9 +14,13 @@ public struct SateSettings: Codable, Sendable, Hashable {
     /// never burns frontier tokens. User-editable like any other model string.
     public var titleModel: String
     public var systemPrompt: String
+    /// System prompt used when web search is enabled.
+    public var systemPromptWithSearch: String
     /// `nil` means "omit the field" and let the provider default apply, which is
     /// not the same as sending 0.
     public var temperature: Double?
+    /// User-controlled reasoning effort sent with completion requests. Default is `.off`.
+    public var thinkingLevel: ThinkingLevel
     /// Always sent: several providers default to a small or unbounded value, and
     /// the reserve in `ContextWindow` is only meaningful if the cap is explicit.
     public var maxTokens: Int
@@ -29,18 +33,33 @@ public struct SateSettings: Codable, Sendable, Hashable {
     public var contextWindows: [String: ContextWindow]
     public var showDebugPanel: Bool
 
+    // Web Search Settings (R6)
+    public var searchEnabledByDefault: Bool
+    public var searchProvider: SearchProviderType
+    public var maxSearchRounds: Int
+    public var searchResultsPerQuery: Int
+    public var alwaysSearchFirstTurn: Bool
+
     public init() {
         accountID = ""
         gatewayID = ""
         defaultModel = ModelCatalog.defaultChat.id
         titleModel = ModelCatalog.defaultTitle.id
-        systemPrompt = SystemPrompt.researchAssistant
+        systemPrompt = SystemPrompt.generalAssistant
+        systemPromptWithSearch = SystemPrompt.generalAssistantWithSearch
         temperature = nil
+        thinkingLevel = .off
         maxTokens = 4096
         includeUsage = true
         collectLogPayload = true
         contextWindows = [:]
         showDebugPanel = false
+
+        searchEnabledByDefault = false
+        searchProvider = .google
+        maxSearchRounds = 3
+        searchResultsPerQuery = 5
+        alwaysSearchFirstTurn = false
     }
 
     /// The token is deliberately not part of this check: it is in the Keychain and
@@ -63,9 +82,10 @@ public struct SateSettings: Codable, Sendable, Hashable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case accountID, gatewayID, defaultModel, titleModel, systemPrompt
-        case temperature, maxTokens, includeUsage, collectLogPayload
+        case accountID, gatewayID, defaultModel, titleModel, systemPrompt, systemPromptWithSearch
+        case temperature, thinkingLevel, maxTokens, includeUsage, collectLogPayload
         case contextWindows, showDebugPanel
+        case searchEnabledByDefault, searchProvider, maxSearchRounds, searchResultsPerQuery, alwaysSearchFirstTurn
     }
 
     public init(from decoder: any Decoder) throws {
@@ -76,7 +96,11 @@ public struct SateSettings: Codable, Sendable, Hashable {
         defaultModel = try container.decodeIfPresent(String.self, forKey: .defaultModel) ?? defaults.defaultModel
         titleModel = try container.decodeIfPresent(String.self, forKey: .titleModel) ?? defaults.titleModel
         systemPrompt = try container.decodeIfPresent(String.self, forKey: .systemPrompt) ?? defaults.systemPrompt
+        systemPromptWithSearch = try container.decodeIfPresent(String.self, forKey: .systemPromptWithSearch)
+            ?? defaults.systemPromptWithSearch
         temperature = try container.decodeIfPresent(Double.self, forKey: .temperature)
+        thinkingLevel = try container.decodeIfPresent(ThinkingLevel.self, forKey: .thinkingLevel)
+            ?? defaults.thinkingLevel
         maxTokens = try container.decodeIfPresent(Int.self, forKey: .maxTokens) ?? defaults.maxTokens
         includeUsage = try container.decodeIfPresent(Bool.self, forKey: .includeUsage) ?? defaults.includeUsage
         collectLogPayload = try container.decodeIfPresent(Bool.self, forKey: .collectLogPayload)
@@ -84,5 +108,15 @@ public struct SateSettings: Codable, Sendable, Hashable {
         contextWindows = try container.decodeIfPresent([String: ContextWindow].self, forKey: .contextWindows)
             ?? defaults.contextWindows
         showDebugPanel = try container.decodeIfPresent(Bool.self, forKey: .showDebugPanel) ?? defaults.showDebugPanel
+
+        searchEnabledByDefault = try container.decodeIfPresent(Bool.self, forKey: .searchEnabledByDefault)
+            ?? defaults.searchEnabledByDefault
+        searchProvider = try container.decodeIfPresent(SearchProviderType.self, forKey: .searchProvider)
+            ?? defaults.searchProvider
+        maxSearchRounds = try container.decodeIfPresent(Int.self, forKey: .maxSearchRounds) ?? defaults.maxSearchRounds
+        searchResultsPerQuery = try container.decodeIfPresent(Int.self, forKey: .searchResultsPerQuery)
+            ?? defaults.searchResultsPerQuery
+        alwaysSearchFirstTurn = try container.decodeIfPresent(Bool.self, forKey: .alwaysSearchFirstTurn)
+            ?? defaults.alwaysSearchFirstTurn
     }
 }

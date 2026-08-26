@@ -135,6 +135,58 @@ struct ChatCompletionsCodecTests {
         #expect(((body["provider"] as? [String: Any])?["order"] as? [String]) == ["a"])
     }
 
+    @Test("Thinking extra parameters round-trip into encoded body")
+    func thinkingExtraRoundTrips() throws {
+        let request = ChatCompletionRequest(
+            model: "openai/o3-mini",
+            messages: [.user("hi")],
+            extra: ["reasoning_effort": .string("high")]
+        )
+        let body = try encodedBody(request)
+        #expect(body["reasoning_effort"] as? String == "high")
+    }
+
+    @Test("Tools and tool_choice are encoded when tools are present")
+    func toolsAndToolChoiceEncoding() throws {
+        let request = ChatCompletionRequest(
+            model: "openai/gpt-5.2",
+            messages: [.user("hi")],
+            tools: [.webSearch]
+        )
+        let body = try encodedBody(request)
+        let tools = try #require(body["tools"] as? [[String: Any]])
+        #expect(tools.count == 1)
+        #expect(tools[0]["type"] as? String == "function")
+        let function = try #require(tools[0]["function"] as? [String: Any])
+        #expect(function["name"] as? String == "web_search")
+        #expect(body["tool_choice"] as? String == "auto")
+    }
+
+    @Test("Assistant turn with tool_calls is encoded even if text is empty")
+    func assistantToolCallsEncoding() throws {
+        let assistant = Message(
+            role: .assistant,
+            content: [],
+            toolCalls: [ToolCall(id: "call_123", name: "web_search", arguments: #"{"query":"Swift"}"#)]
+        )
+        let toolMsg = Message.tool("Result text", toolCallID: "call_123")
+        let request = ChatCompletionRequest(
+            model: "m",
+            messages: [.user("Search swift"), assistant, toolMsg]
+        )
+        let body = try encodedBody(request)
+        let messages = try #require(body["messages"] as? [[String: Any]])
+        #expect(messages.count == 3)
+        #expect(messages[1]["role"] as? String == "assistant")
+        let toolCalls = try #require(messages[1]["tool_calls"] as? [[String: Any]])
+        #expect(toolCalls.count == 1)
+        #expect(toolCalls[0]["id"] as? String == "call_123")
+
+        #expect(messages[2]["role"] as? String == "tool")
+        #expect(messages[2]["tool_call_id"] as? String == "call_123")
+        #expect(messages[2]["content"] as? String == "Result text")
+    }
+
     // MARK: - Decoding
 
     @Test("content delta becomes a textDelta")
@@ -285,7 +337,12 @@ struct ChatCompletionsCodecTests {
     @Test("decodeComplete turns a whole body into started + delta + finished")
     func decodeCompleteBody() throws {
         let body = Data(#"""
-        {"id":"cmpl_9","model":"openai/gpt-5.2","choices":[{"index":0,"message":{"role":"assistant","content":"Hello there"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}
+        {
+          "id": "cmpl_9",
+          "model": "openai/gpt-5.2",
+          "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hello there"}, "finish_reason": "stop"}],
+          "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}
+        }
         """#.utf8)
         #expect(try codec.decodeComplete(body) == [
             .started(responseID: "cmpl_9", model: "openai/gpt-5.2"),
