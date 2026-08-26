@@ -222,7 +222,10 @@ final class AppEnvironment {
         if isMock {
             return MockSearchProvider()
         }
-        return nil
+        guard let token = searchToken(), !token.isEmpty else {
+            return nil
+        }
+        return TavilySearchProvider(apiKey: token)
     }
 
     // MARK: - Estimator

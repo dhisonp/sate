@@ -13,7 +13,7 @@ import Security
 struct KeychainSecretStore: SecretStore {
     static let service = "com.dhison.sate"
     static let cloudflareAccount = "cloudflare-token"
-    static let searchAccount = "google-token"
+    static let searchAccount = "tavily-token"
 
     enum Failure: Error, Equatable {
         case keychain(OSStatus)
