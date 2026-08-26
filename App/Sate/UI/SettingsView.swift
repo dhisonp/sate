@@ -137,7 +137,7 @@ struct SettingsView: View {
                 }
 
                 SecureField(
-                    hasStoredSearchToken ? "•••• set — enter to replace" : "Google Search API Key",
+                    hasStoredSearchToken ? "•••• set — enter to replace" : "Tavily API Key (tvly-...)",
                     text: $searchTokenEntry
                 )
                 .textInputAutocapitalization(.never)
@@ -168,13 +168,6 @@ struct SettingsView: View {
                     }
                 }
 
-                LabeledContent("Search Engine ID (cx)") {
-                    TextField("cx identifier", text: $env.settings.googleSearchEngineID)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .multilineTextAlignment(.trailing)
-                }
-
                 Toggle("Search by default", isOn: $env.settings.searchEnabledByDefault)
 
                 Stepper("Max search rounds: \(env.settings.maxSearchRounds)", value: $env.settings.maxSearchRounds, in: 1 ... 5)
@@ -184,9 +177,8 @@ struct SettingsView: View {
                 Text("Web Search")
             } footer: {
                 Text("""
-                Uses the Google Custom Search API directly from device. Requires an API Key \
-                and a Search Engine ID (cx) from Google Programmable Search Engine. \
-                The key is stored securely in the Keychain.
+                Uses Tavily Search directly from device. The key is stored securely in the Keychain. \
+                A search failure will never block chat.
                 """)
             }
 

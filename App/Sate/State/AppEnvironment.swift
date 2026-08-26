@@ -218,11 +218,11 @@ final class AppEnvironment {
         cachedSearchToken
     }
 
-    func makeSearchProvider() -> any SearchProvider {
+    func makeSearchProvider() -> (any SearchProvider)? {
         if isMock {
             return MockSearchProvider()
         }
-        return GoogleSearchProvider(apiKey: cachedSearchToken ?? "", cx: settings.googleSearchEngineID)
+        return nil
     }
 
     // MARK: - Estimator

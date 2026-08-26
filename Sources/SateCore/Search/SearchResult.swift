@@ -31,11 +31,11 @@ public protocol SearchProvider: Sendable {
 }
 
 public enum SearchProviderType: String, Codable, Sendable, CaseIterable {
-    case google
+    case tavily
 
     public var displayName: String {
         switch self {
-        case .google: return "Google Search"
+        case .tavily: return "Tavily"
         }
     }
 }

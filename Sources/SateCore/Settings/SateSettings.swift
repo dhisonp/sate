@@ -36,7 +36,6 @@ public struct SateSettings: Codable, Sendable, Hashable {
     // Web Search Settings (R6)
     public var searchEnabledByDefault: Bool
     public var searchProvider: SearchProviderType
-    public var googleSearchEngineID: String
     public var maxSearchRounds: Int
     public var searchResultsPerQuery: Int
     public var alwaysSearchFirstTurn: Bool
@@ -57,8 +56,7 @@ public struct SateSettings: Codable, Sendable, Hashable {
         showDebugPanel = false
 
         searchEnabledByDefault = false
-        searchProvider = .google
-        googleSearchEngineID = ""
+        searchProvider = .tavily
         maxSearchRounds = 3
         searchResultsPerQuery = 5
         alwaysSearchFirstTurn = false
@@ -87,7 +85,7 @@ public struct SateSettings: Codable, Sendable, Hashable {
         case accountID, gatewayID, defaultModel, titleModel, systemPrompt, systemPromptWithSearch
         case temperature, thinkingLevel, maxTokens, includeUsage, collectLogPayload
         case contextWindows, showDebugPanel
-        case searchEnabledByDefault, searchProvider, googleSearchEngineID, maxSearchRounds, searchResultsPerQuery, alwaysSearchFirstTurn
+        case searchEnabledByDefault, searchProvider, maxSearchRounds, searchResultsPerQuery, alwaysSearchFirstTurn
     }
 
     public init(from decoder: any Decoder) throws {
@@ -115,8 +113,6 @@ public struct SateSettings: Codable, Sendable, Hashable {
             ?? defaults.searchEnabledByDefault
         searchProvider = try container.decodeIfPresent(SearchProviderType.self, forKey: .searchProvider)
             ?? defaults.searchProvider
-        googleSearchEngineID = try container.decodeIfPresent(String.self, forKey: .googleSearchEngineID)
-            ?? defaults.googleSearchEngineID
         maxSearchRounds = try container.decodeIfPresent(Int.self, forKey: .maxSearchRounds) ?? defaults.maxSearchRounds
         searchResultsPerQuery = try container.decodeIfPresent(Int.self, forKey: .searchResultsPerQuery)
             ?? defaults.searchResultsPerQuery
