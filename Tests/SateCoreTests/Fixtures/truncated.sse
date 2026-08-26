@@ -1,0 +1,5 @@
+data: {"id":"chatcmpl-trunc-9001","object":"chat.completion.chunk","created":1756180150,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-trunc-9001","object":"chat.completion.chunk","created":1756180150,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"The answer is"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-trunc-9001","object":"chat.completion.chunk","created":175618

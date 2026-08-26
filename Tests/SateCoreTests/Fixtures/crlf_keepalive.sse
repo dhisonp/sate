@@ -1,0 +1,17 @@
+: keepalive
+
+data: {"id":"chatcmpl-crlf-3312","object":"chat.completion.chunk","created":1756180200,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+: keepalive
+
+event: chunk
+id: 42
+data: {"id":"chatcmpl-crlf-3312","object":"chat.completion.chunk",
+data:  "choices":[{"index":0,"delta":{"content":"line one"},"finish_reason":null}]}
+
+: keepalive
+
+data: {"id":"chatcmpl-crlf-3312","object":"chat.completion.chunk","created":1756180200,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+

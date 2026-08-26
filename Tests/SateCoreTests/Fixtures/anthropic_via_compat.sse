@@ -1,0 +1,14 @@
+data: {"id":"chatcmpl-anthropic-7d21","object":"chat.completion.chunk","created":1756180042,"model":"anthropic/claude-opus-5","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-anthropic-7d21","object":"chat.completion.chunk","created":1756180042,"model":"anthropic/claude-opus-5","choices":[{"index":0,"delta":{"reasoning_content":"The user only said hello, so a short greeting back is enough."},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-anthropic-7d21","object":"chat.completion.chunk","created":1756180042,"model":"anthropic/claude-opus-5","choices":[{"index":0,"delta":{"content":"Hi there"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-anthropic-7d21","object":"chat.completion.chunk","created":1756180042,"model":"anthropic/claude-opus-5","choices":[{"index":0,"delta":{"content":" 你好 🚀"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-anthropic-7d21","object":"chat.completion.chunk","created":1756180042,"model":"anthropic/claude-opus-5","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"chatcmpl-anthropic-7d21","object":"chat.completion.chunk","created":1756180042,"model":"anthropic/claude-opus-5","choices":[],"usage":{"prompt_tokens":24,"completion_tokens":11,"total_tokens":35}}
+
+data: [DONE]
+
