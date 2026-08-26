@@ -6,6 +6,7 @@ import Foundation
 enum ChatPhase: Equatable {
     case idle
     case sending
+    case searching(String)
     case awaitingFirstToken
     case streaming
     /// A partial answer was committed: cancelled, dropped, backgrounded, or
@@ -15,7 +16,7 @@ enum ChatPhase: Equatable {
 
     var isBusy: Bool {
         switch self {
-        case .sending, .awaitingFirstToken, .streaming: return true
+        case .sending, .searching, .awaitingFirstToken, .streaming: return true
         case .idle, .interrupted, .failed: return false
         }
     }
@@ -34,6 +35,7 @@ final class ChatViewModel {
     let draft = Draft()
     private(set) var phase: ChatPhase = .idle
     var input: String = ""
+    var isSearchEnabled: Bool
     private(set) var title: String
     var model: String {
         didSet {
@@ -81,6 +83,7 @@ final class ChatViewModel {
         self.environment = environment
         title = "New Conversation"
         model = environment.settings.defaultModel
+        isSearchEnabled = environment.settings.searchEnabledByDefault
     }
 
     /// True when the newest assistant message can be continued.
@@ -252,13 +255,15 @@ final class ChatViewModel {
         // Resolved per send, not when the prompt was saved: a prompt stored in
         // Settings weeks ago must still report today's date, or the model
         // reasons about "now" as of its training cutoff.
-        let systemPrompt = SystemPrompt.resolve(settings.systemPrompt)
+        let rawPrompt = isSearchEnabled ? settings.systemPromptWithSearch : settings.systemPrompt
+        let systemPrompt = SystemPrompt.resolve(rawPrompt)
         let context = shrunk
             ? builder.rebuild(
                 branch: branch, systemPrompt: systemPrompt, window: window, shrinkTo: 0.75
             )
             : builder.build(branch: branch, systemPrompt: systemPrompt, window: window)
 
+        let thinkingExtra = ThinkingPolicy.extra(for: model, level: settings.thinkingLevel)
         // The builder already put the system prompt at the head of `messages`, so
         // passing it again here would send it twice.
         let request = ChatCompletionRequest(
@@ -267,13 +272,20 @@ final class ChatViewModel {
             systemPrompt: nil,
             maxTokens: settings.maxTokens,
             temperature: settings.temperature,
-            includeUsage: settings.includeUsage
+            includeUsage: settings.includeUsage,
+            tools: isSearchEnabled ? [.webSearch] : nil,
+            extra: thinkingExtra
         )
         attempt = Attempt(request: request, parentID: parentID, branch: branch, shrunk: shrunk)
 
+        let searchProvider = isSearchEnabled ? environment.makeSearchProvider() : nil
         let started = await session.start(
             request: request,
             client: environment.client,
+            searchProvider: searchProvider,
+            searchEnabled: isSearchEnabled,
+            maxSearchRounds: settings.maxSearchRounds,
+            searchResultsPerQuery: settings.searchResultsPerQuery,
             parentID: parentID,
             events: makeEvents()
         )
@@ -291,6 +303,9 @@ final class ChatViewModel {
             started: { [weak self] responseID, model in
                 self?.handleStarted(responseID: responseID, model: model)
             },
+            searching: { [weak self] query in
+                self?.handleSearching(query)
+            },
             flushed: { [weak self] buffer in
                 self?.handleFlush(buffer)
             },
@@ -300,9 +315,17 @@ final class ChatViewModel {
         )
     }
 
+    private func handleSearching(_ query: String) {
+        phase = .searching(query)
+    }
+
     private func handleStarted(responseID _: String?, model _: String?) {
-        guard phase == .sending else { return }
-        phase = .awaitingFirstToken
+        switch phase {
+        case .sending, .searching:
+            phase = .awaitingFirstToken
+        default:
+            break
+        }
     }
 
     private func handleFlush(_ buffer: DeltaBuffer) {

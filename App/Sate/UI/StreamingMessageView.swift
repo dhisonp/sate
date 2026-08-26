@@ -22,25 +22,27 @@ struct StreamingMessageView: View {
     var body: some View {
         let paragraphs = MarkdownParagraphs.split(draft.text)
 
-        // Nothing to show before the first token, and nothing to show once the
-        // response has been committed to the transcript. The view stays in the
-        // hierarchy either way so the commit swap never moves the scroll position.
-        if paragraphs.isEmpty {
+        if !draft.isActive && paragraphs.isEmpty {
             EmptyView()
         } else {
             VStack(alignment: .leading, spacing: 10) {
                 StreamingReasoningView(draft: draft)
                     .equatable()
 
-                ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
-                    if index == paragraphs.count - 1 {
-                        // The only view that re-lays out on a token flush.
-                        Text(paragraph)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        FrozenParagraph(text: paragraph)
-                            .equatable()
+                if draft.text.isEmpty {
+                    ThinkingIndicator(draft: draft)
+                        .padding(.vertical, 2)
+                } else {
+                    ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
+                        if index == paragraphs.count - 1 {
+                            // The only view that re-lays out on a token flush.
+                            Text(paragraph)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            FrozenParagraph(text: paragraph)
+                                .equatable()
+                        }
                     }
                 }
             }

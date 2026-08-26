@@ -61,8 +61,11 @@ struct MessageBubble: View, Equatable {
                 if let reasoning = message.reasoning, !reasoning.isEmpty {
                     ReasoningDisclosure(text: reasoning)
                 }
-                MarkdownBlocksView(source: message.text)
+                MarkdownBlocksView(source: message.text, sources: message.sources)
                     .equatable()
+                if let sources = message.sources, !sources.isEmpty {
+                    SourcesView(sources: sources)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contextMenu {

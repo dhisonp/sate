@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// Composer + Send/Stop.
+/// Composer + Search Toggle + Send/Stop (R4.1).
 ///
 /// Send/Stop state deliberately lives here rather than in `ChatView`: this view's
 /// body is the only place that reads `vm.phase` for the button, so a phase change
-/// re-evaluates a two-control `HStack` instead of the whole transcript.
+/// re-evaluates a three-control `HStack` instead of the whole transcript.
 ///
 /// The field is always interactive — the user can keep typing the next prompt
 /// while a response streams, and the text survives a failed send because the
@@ -21,10 +21,8 @@ struct InputBar: View {
         !vm.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// The field and the action button are two adjacent glass elements. They are
-    /// deliberately *not* wrapped in their own `GlassEffectContainer` here —
-    /// `ChatView` puts one around the whole bottom inset so the composer, the
-    /// status pill and the debug panel all share a single sampling region.
+    /// The field and the action buttons are adjacent glass elements sharing
+    /// `ChatView`'s `GlassEffectContainer` for consistent sampling.
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
             TextField("Message", text: $vm.input, axis: .vertical)
@@ -37,10 +35,29 @@ struct InputBar: View {
                 .glassEffect(.regular, in: .capsule)
                 .accessibilityLabel("Message")
 
+            searchButton
+
             actionButton
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
+    }
+
+    private var searchButton: some View {
+        Button {
+            vm.isSearchEnabled.toggle()
+        } label: {
+            Image(systemName: "globe")
+                .font(.system(size: 16, weight: vm.isSearchEnabled ? .bold : .medium))
+                .foregroundStyle(vm.isSearchEnabled ? Color.accentColor : Color.secondary)
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .controlSize(.large)
+        .clipShape(Circle())
+        .frame(minWidth: 44, minHeight: 44)
+        .accessibilityLabel(vm.isSearchEnabled ? "Web search enabled" : "Web search disabled")
+        .accessibilityHint("Double-tap to toggle web search for this conversation")
     }
 
     private var actionButton: some View {

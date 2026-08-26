@@ -41,12 +41,18 @@ final class AppEnvironment {
     @ObservationIgnored private var configurationSignature: String
     /// Cached so `hasToken` never touches the Keychain from a view's `body`.
     private var cachedToken: String?
+    private var cachedSearchToken: String?
     @ObservationIgnored private var viewModels: [UUID: ChatViewModel] = [:]
     @ObservationIgnored private var sessions: [UUID: ConversationSession] = [:]
 
     var hasToken: Bool {
         guard let cachedToken else { return false }
         return !cachedToken.isEmpty
+    }
+
+    var hasSearchToken: Bool {
+        guard let cachedSearchToken else { return false }
+        return !cachedSearchToken.isEmpty
     }
 
     init(
@@ -64,6 +70,7 @@ final class AppEnvironment {
         self.defaults = defaults
         self.isMock = isMock
         cachedToken = try? secrets.token()
+        cachedSearchToken = try? secrets.searchToken()
         urlSession = isMock ? nil : AppEnvironment.makeURLSession()
         if isMock {
             client = MockGatewayClient()
@@ -96,9 +103,9 @@ final class AppEnvironment {
 
         let store = ConversationStore(directory: conversationsDirectory())
         // The mock path must work with no Keychain entry and no network, so it
-        // gets a stand-in token purely to satisfy `hasToken`.
+        // gets stand-in tokens purely to satisfy `hasToken` and `hasSearchToken`.
         let secrets: any SecretStore = isMock
-            ? InMemorySecretStore(token: "mock-token")
+            ? InMemorySecretStore(token: "mock-token", searchToken: "mock-search-token")
             : KeychainSecretStore()
 
         return AppEnvironment(
@@ -184,6 +191,24 @@ final class AppEnvironment {
 
     func token() -> String? {
         cachedToken
+    }
+
+    func setSearchToken(_ token: String?) {
+        let trimmed = token?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        try? secrets.setSearchToken(value)
+        cachedSearchToken = value
+    }
+
+    func searchToken() -> String? {
+        cachedSearchToken
+    }
+
+    func makeSearchProvider() -> any SearchProvider {
+        if isMock {
+            return MockSearchProvider()
+        }
+        return GoogleSearchProvider(apiKey: cachedSearchToken ?? "")
     }
 
     // MARK: - Estimator

@@ -1,14 +1,36 @@
 import Foundation
 
+/// Mock search provider for offline simulator and test runs.
+public struct MockSearchProvider: SearchProvider, Sendable {
+    public init() {}
+
+    public func search(_: String, limit _: Int = 5) async throws -> [SearchResult] {
+        [
+            SearchResult(
+                title: "Swift 6 Concurrency and Architecture Overview",
+                url: "https://developer.apple.com/documentation/swift/concurrency",
+                snippet: "Complete guide to Swift 6 strict concurrency, Sendable checking, and async/await task systems in iOS applications.",
+                publishedAt: Date(timeIntervalSince1970: 1_756_000_000),
+                siteName: "Apple Developer"
+            ),
+            SearchResult(
+                title: "Cloudflare AI Gateway - Fast, Scalable LLM Broker",
+                url: "https://developers.cloudflare.com/ai-gateway",
+                snippet: "Cloudflare AI Gateway manages API keys, intelligent model routing, spend limits, rate limiting, and unified logging.",
+                publishedAt: Date(timeIntervalSince1970: 1_755_000_000),
+                siteName: "Cloudflare Docs"
+            ),
+        ]
+    }
+}
+
 /// Offline stand-in for `GatewayClient`, selected when the process is launched
 /// with `SATE_MOCK=1`.
 ///
 /// It replays a bundled SSE script through the *real* `SSEParser` and
 /// `ChatCompletionsCodec`, at realistic per-chunk delays, so the streaming UI,
-/// the coalescer, checkpointing, persistence and every error path can be
-/// exercised in the simulator with no Cloudflare token and no network. The
-/// script is a string literal rather than a bundled resource because the test
-/// fixtures under `Tests/` are not copied into the app.
+/// the coalescer, checkpointing, persistence, tool execution loop, and every error
+/// path can be exercised in the simulator with no Cloudflare token and no network.
 ///
 /// Prompt triggers (matched case-insensitively anywhere in the last user turn):
 ///   * `error` — an in-stream `{"error":…}` after a partial answer
@@ -46,6 +68,8 @@ actor MockGatewayClient: LLMStreaming {
         continuation: AsyncThrowingStream<StreamEvent, any Error>.Continuation
     ) async {
         let prompt = request.messages.last { $0.role == .user }?.text.lowercased() ?? ""
+        let isAnsweringTool = request.messages.last?.role == .tool
+        let hasTools = request.tools != nil && !(request.tools?.isEmpty ?? true)
         let start = Date()
         var trace = NetworkTrace(
             route: "mock",
@@ -66,10 +90,14 @@ actor MockGatewayClient: LLMStreaming {
         }
 
         let script: String
-        if prompt.contains("error") {
+        if isAnsweringTool {
+            script = Self.searchAnswerScript
+        } else if prompt.contains("error") {
             script = Self.errorScript
         } else if prompt.contains("truncate") {
             script = Self.truncatedScript
+        } else if hasTools, prompt.contains("search") || prompt.contains("latest") || prompt.contains("who") || prompt.contains("what") {
+            script = Self.searchToolCallScript
         } else {
             script = Self.normalScript
         }
@@ -105,11 +133,6 @@ actor MockGatewayClient: LLMStreaming {
                     if event.isTerminator {
                         break feed
                     }
-                    // decodeChunk, not decode: only it distinguishes a reason the
-                    // provider actually sent from the placeholder that a usage-only
-                    // trailer carries. Coalescing on the flattened form would let a
-                    // trailer arriving before the finish chunk mask a real "length"
-                    // or "content_filter" — see ChatCompletionsCodec.ChunkTermination.
                     let (events, termination) = try codec.decodeChunk(dataPayload: event.data)
                     for streamEvent in events {
                         if case .started = streamEvent {
@@ -118,8 +141,6 @@ actor MockGatewayClient: LLMStreaming {
                         }
                         continuation.yield(streamEvent)
                     }
-                    // Same contract as GatewayClient: first OBSERVED reason wins,
-                    // last usage wins, exactly one terminal event at the end.
                     if reason == nil, let observed = termination.reason {
                         reason = observed
                     }
@@ -147,9 +168,6 @@ actor MockGatewayClient: LLMStreaming {
         continuation.finish()
     }
 
-    /// Splits the script into per-event chunks, then halves each one so the
-    /// parser really does see an event straddling a chunk boundary — that is the
-    /// framing bug this mock exists to keep honest.
     private static func chunks(of script: String) -> [String] {
         var out: [String] = []
         for block in script.components(separatedBy: "\n\n") where !block.isEmpty {
@@ -163,9 +181,33 @@ actor MockGatewayClient: LLMStreaming {
 
     // MARK: - Scripts
 
-    //
-    // Raw string literals so the `\n` sequences inside the JSON stay backslash-n
-    // on the wire; a real newline there would be invalid JSON.
+    private static let searchToolCallScript = #"""
+    data: {"id":"chatcmpl-mock-search-01","object":"chat.completion.chunk","created":1756180000,"model":"mock/sate-preview","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+    data: {"id":"chatcmpl-mock-search-01","object":"chat.completion.chunk","created":1756180000,"model":"mock/sate-preview","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_mock_search_1","type":"function","function":{"name":"web_search","arguments":"{\"query\":\"latest iOS updates\"}"}}]},"finish_reason":"tool_calls"}]}
+
+    data: {"id":"chatcmpl-mock-search-01","object":"chat.completion.chunk","created":1756180000,"model":"mock/sate-preview","choices":[],"usage":{"prompt_tokens":85,"completion_tokens":22,"total_tokens":107}}
+
+    data: [DONE]
+
+    """#
+
+    private static let searchAnswerScript = #"""
+    data: {"id":"chatcmpl-mock-search-02","object":"chat.completion.chunk","created":1756180005,"model":"mock/sate-preview","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+    data: {"id":"chatcmpl-mock-search-02","object":"chat.completion.chunk","created":1756180005,"model":"mock/sate-preview","choices":[{"index":0,"delta":{"content":"Based on the latest search results, "},"finish_reason":null}]}
+
+    data: {"id":"chatcmpl-mock-search-02","object":"chat.completion.chunk","created":1756180005,"model":"mock/sate-preview","choices":[{"index":0,"delta":{"content":"Swift 6 brings full strict concurrency guarantees [1].\n\n"},"finish_reason":null}]}
+
+    data: {"id":"chatcmpl-mock-search-02","object":"chat.completion.chunk","created":1756180005,"model":"mock/sate-preview","choices":[{"index":0,"delta":{"content":"Cloudflare AI Gateway routes all calls through an authenticated gateway [2]."},"finish_reason":null}]}
+
+    data: {"id":"chatcmpl-mock-search-02","object":"chat.completion.chunk","created":1756180005,"model":"mock/sate-preview","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+    data: {"id":"chatcmpl-mock-search-02","object":"chat.completion.chunk","created":1756180005,"model":"mock/sate-preview","choices":[],"usage":{"prompt_tokens":195,"completion_tokens":48,"total_tokens":243}}
+
+    data: [DONE]
+
+    """#
 
     private static let normalScript = #"""
     data: {"id":"chatcmpl-mock-0001","object":"chat.completion.chunk","created":1756180000,"model":"mock/sate-preview","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}

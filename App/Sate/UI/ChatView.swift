@@ -82,7 +82,7 @@ struct ChatView: View {
                     // A `List` is forbidden here: UICollectionView self-sizing
                     // re-measures a mutating row on every change and the
                     // transcript visibly jumps while tokens land.
-                    ForEach(vm.messages) { message in
+                    ForEach(visibleMessages) { message in
                         MessageBubble(
                             message: message,
                             siblings: vm.siblings(of: message.id),
@@ -204,6 +204,18 @@ struct ChatView: View {
         return parts.joined(separator: " · ")
     }
 
+    private var visibleMessages: [Message] {
+        vm.messages.filter { message in
+            if message.role == .tool {
+                return false
+            }
+            if message.role == .assistant, message.text.isEmpty, !(message.toolCalls?.isEmpty ?? true) {
+                return false
+            }
+            return true
+        }
+    }
+
     // MARK: Status area
 
     /// Everything between the transcript and the composer. Reads `phase`, which
@@ -216,6 +228,18 @@ struct ChatView: View {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text("Sending…").font(.footnote).foregroundStyle(.secondary)
+                }
+                .statusPillGlass()
+            }
+
+        case let .searching(query):
+            statusRow {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Searching “\(query)”…")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
                 .statusPillGlass()
             }
@@ -300,7 +324,7 @@ struct ChatView: View {
             AccessibilityNotification.Announcement("Response interrupted").post()
         case let .failed(error):
             AccessibilityNotification.Announcement(error.userMessage).post()
-        case .sending, .awaitingFirstToken, .streaming:
+        case .sending, .searching, .awaitingFirstToken, .streaming:
             break
         }
     }

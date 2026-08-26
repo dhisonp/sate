@@ -73,6 +73,7 @@ struct GenerationOutcome: Sendable {
 /// than a delegate so `ConversationSession` never holds the view model.
 struct GenerationEvents: Sendable {
     var started: @MainActor @Sendable (_ responseID: String?, _ model: String?) -> Void
+    var searching: (@MainActor @Sendable (String) -> Void)?
     /// The buffer is handed over rather than a `Flush` so the drain happens on
     /// the main actor — see `DeltaBuffer`.
     var flushed: @MainActor @Sendable (DeltaBuffer) -> Void
@@ -80,10 +81,12 @@ struct GenerationEvents: Sendable {
 
     init(
         started: @escaping @MainActor @Sendable (String?, String?) -> Void,
+        searching: (@MainActor @Sendable (String) -> Void)? = nil,
         flushed: @escaping @MainActor @Sendable (DeltaBuffer) -> Void,
         completed: @escaping @MainActor @Sendable (GenerationOutcome) -> Void
     ) {
         self.started = started
+        self.searching = searching
         self.flushed = flushed
         self.completed = completed
     }
@@ -91,7 +94,7 @@ struct GenerationEvents: Sendable {
 
 // MARK: - Session
 
-/// Owns the streaming `Task` for one conversation (R2.8).
+/// Owns the streaming and tool-execution `Task` for one conversation (R2.8 / R2).
 ///
 /// The task lives here, held by `AppEnvironment`, and *not* in a SwiftUI `.task`:
 /// `.task` is cancelled when the view disappears, so navigating back to the
@@ -119,12 +122,16 @@ actor ConversationSession {
         task != nil
     }
 
-    /// Starts a generation. Returns false when one is already in flight for this
+    /// Starts a generation loop. Returns false when one is already in flight for this
     /// conversation (R2.10: max one).
     @discardableResult
     func start(
         request: ChatCompletionRequest,
         client: any LLMStreaming,
+        searchProvider: (any SearchProvider)? = nil,
+        searchEnabled: Bool = false,
+        maxSearchRounds: Int = ToolRunner.maxRoundsDefault,
+        searchResultsPerQuery: Int = ToolRunner.defaultResultsPerCall,
         parentID: UUID?,
         events: GenerationEvents
     ) -> Bool {
@@ -137,6 +144,10 @@ actor ConversationSession {
             let outcome = await Self.generate(
                 request: request,
                 client: client,
+                searchProvider: searchProvider,
+                searchEnabled: searchEnabled,
+                maxSearchRounds: maxSearchRounds,
+                searchResultsPerQuery: searchResultsPerQuery,
                 parentID: parentID,
                 conversationID: conversationID,
                 store: store,
@@ -175,129 +186,263 @@ actor ConversationSession {
     private static func generate(
         request: ChatCompletionRequest,
         client: any LLMStreaming,
+        searchProvider: (any SearchProvider)?,
+        searchEnabled: Bool,
+        maxSearchRounds: Int,
+        searchResultsPerQuery: Int,
         parentID: UUID?,
         conversationID: UUID,
         store: ConversationStore,
         events: GenerationEvents
     ) async -> GenerationOutcome {
-        let buffer = DeltaBuffer()
-        var text = ""
-        var reasoning = ""
-        var finishReason: FinishReason?
-        var usage: Usage?
-        var responseModel: String?
-        var failure: GatewayError?
-        var lastCheckpoint = Date()
-
-        let ticker = Task.detached(priority: .utility) {
-            while !Task.isCancelled {
-                do {
-                    try await Task.sleep(nanoseconds: trailingFlushNanoseconds)
-                } catch {
-                    return
-                }
-                guard buffer.drainPending() else { continue }
-                await MainActor.run { events.flushed(buffer) }
-            }
-        }
-        defer { ticker.cancel() }
-
-        do {
-            for try await event in client.stream(request, conversationID: conversationID) {
-                switch event {
-                case let .started(responseID, model):
-                    responseModel = model
-                    await MainActor.run { events.started(responseID, model) }
-                case let .textDelta(delta):
-                    text += delta
-                    if buffer.append(text: delta) {
-                        await MainActor.run { events.flushed(buffer) }
-                    }
-                case let .reasoningDelta(delta):
-                    reasoning += delta
-                    if buffer.append(reasoning: delta) {
-                        await MainActor.run { events.flushed(buffer) }
-                    }
-                case .toolCallDelta:
-                    // v1 does not execute tools; the event exists so an agent loop
-                    // can be added without touching the transport.
-                    continue
-                case let .finished(reason, reported):
-                    finishReason = reason
-                    if let reported {
-                        usage = reported
-                    }
-                }
-
-                if Date().timeIntervalSince(lastCheckpoint) >= checkpointInterval,
-                   !text.isEmpty || !reasoning.isEmpty
-                {
-                    lastCheckpoint = Date()
-                    try? await store.checkpoint(
-                        conversationID: conversationID,
-                        parentID: parentID,
-                        text: text,
-                        reasoning: reasoning,
-                        model: request.model
-                    )
-                }
-            }
-        } catch let error as GatewayError {
-            failure = error
-        } catch is CancellationError {
-            failure = .cancelled
-        } catch {
-            failure = .protocolError("\(error)")
-        }
-
-        // `AsyncThrowingStream` finishes *normally* when its consumer is
-        // cancelled, so cancellation has to be detected here rather than caught.
-        if failure == nil, Task.isCancelled {
-            failure = .cancelled
-        }
-
-        // Stop the timer before the terminal drain so the two cannot race to
-        // schedule the same tail twice.
-        ticker.cancel()
-        if buffer.drainPending() {
-            await MainActor.run { events.flushed(buffer) }
-        }
-
-        var outcome = GenerationOutcome(
-            finishReason: finishReason,
-            usage: usage,
-            error: failure,
-            trace: await client.lastTrace
+        var currentParentID = parentID
+        var currentMessages = request.messages
+        var currentRequest = request
+        var round = 1
+        var allSources: [SearchResult] = []
+        var totalPromptTokens = 0
+        var totalCompletionTokens = 0
+        var finalOutcome: GenerationOutcome?
+        let toolRunner = ToolRunner(
+            searchProvider: searchProvider,
+            maxRounds: maxSearchRounds,
+            resultsPerQuery: searchResultsPerQuery
         )
 
-        let clean = failure == nil && (finishReason?.isClean ?? false)
-        if !text.isEmpty || !reasoning.isEmpty {
-            let message = Message(
-                parentID: parentID,
-                role: .assistant,
-                content: [.text(text)],
-                reasoning: reasoning.isEmpty ? nil : reasoning,
-                model: responseModel ?? request.model,
-                finishReason: finishReason ?? .truncated,
-                usage: usage,
-                interrupted: !clean,
-                logID: outcome.trace?.logID
-            )
-            do {
-                // `append` deletes the in-flight sidecar in the same actor turn,
-                // so nothing here may clear it again: a second delete could race
-                // a *newer* generation's checkpoint.
-                try await store.append(message, to: conversationID)
-                outcome.committed = message
-            } catch {
-                outcome.error = outcome.error ?? .protocolError("The response could not be saved.")
+        while round <= maxSearchRounds + 1 {
+            let buffer = DeltaBuffer()
+            var text = ""
+            var reasoning = ""
+            var finishReason: FinishReason?
+            var roundUsage: Usage?
+            var responseModel: String?
+            var failure: GatewayError?
+            var lastCheckpoint = Date()
+            var toolCallFragments: [Int: (id: String?, name: String?, arguments: String)] = [:]
+
+            let ticker = Task.detached(priority: .utility) {
+                while !Task.isCancelled {
+                    do {
+                        try await Task.sleep(nanoseconds: trailingFlushNanoseconds)
+                    } catch {
+                        return
+                    }
+                    guard buffer.drainPending() else { continue }
+                    await MainActor.run { events.flushed(buffer) }
+                }
             }
-        } else {
-            // Nothing was generated (rejected before the first byte, or cancelled
-            // while still connecting): no empty assistant turn, just drop the
-            // sidecar so launch recovery does not resurrect it.
-            try? await store.clearCheckpoint(conversationID)
+
+            do {
+                for try await event in client.stream(currentRequest, conversationID: conversationID) {
+                    switch event {
+                    case let .started(responseID, model):
+                        responseModel = model
+                        await MainActor.run { events.started(responseID, model) }
+                    case let .textDelta(delta):
+                        text += delta
+                        if buffer.append(text: delta) {
+                            await MainActor.run { events.flushed(buffer) }
+                        }
+                    case let .reasoningDelta(delta):
+                        reasoning += delta
+                        if buffer.append(reasoning: delta) {
+                            await MainActor.run { events.flushed(buffer) }
+                        }
+                    case let .toolCallDelta(index, id, name, argumentsFragment):
+                        var current = toolCallFragments[index] ?? (id: nil, name: nil, arguments: "")
+                        if let id {
+                            current.id = id
+                        }
+                        if let name {
+                            current.name = name
+                        }
+                        current.arguments += argumentsFragment
+                        toolCallFragments[index] = current
+                    case let .finished(reason, reported):
+                        finishReason = reason
+                        if let reported {
+                            roundUsage = reported
+                        }
+                    }
+
+                    if Date().timeIntervalSince(lastCheckpoint) >= checkpointInterval,
+                       !text.isEmpty || !reasoning.isEmpty
+                    {
+                        lastCheckpoint = Date()
+                        try? await store.checkpoint(
+                            conversationID: conversationID,
+                            parentID: currentParentID,
+                            text: text,
+                            reasoning: reasoning,
+                            model: currentRequest.model
+                        )
+                    }
+                }
+            } catch let error as GatewayError {
+                failure = error
+            } catch is CancellationError {
+                failure = .cancelled
+            } catch {
+                failure = .protocolError("\(error)")
+            }
+
+            if failure == nil, Task.isCancelled {
+                failure = .cancelled
+            }
+
+            ticker.cancel()
+            if buffer.drainPending() {
+                await MainActor.run { events.flushed(buffer) }
+            }
+
+            if let roundUsage {
+                totalPromptTokens += roundUsage.promptTokens
+                totalCompletionTokens += roundUsage.completionTokens
+            }
+
+            let orderedToolCalls: [ToolCall] = toolCallFragments.keys.sorted().compactMap { index in
+                guard let fragment = toolCallFragments[index],
+                      let name = fragment.name ?? (fragment.id != nil ? "web_search" : nil)
+                else { return nil }
+                return ToolCall(
+                    id: fragment.id ?? "call_\(index)",
+                    name: name,
+                    arguments: fragment.arguments
+                )
+            }
+
+            let shouldExecuteTools = searchEnabled
+                && failure == nil
+                && (finishReason == .toolCalls || !orderedToolCalls.isEmpty)
+                && round <= maxSearchRounds
+
+            if shouldExecuteTools {
+                // Commit the assistant turn carrying tool_calls (R2.3).
+                let assistantMsg = Message(
+                    parentID: currentParentID,
+                    role: .assistant,
+                    content: text.isEmpty ? [] : [.text(text)],
+                    reasoning: reasoning.isEmpty ? nil : reasoning,
+                    model: responseModel ?? currentRequest.model,
+                    finishReason: .toolCalls,
+                    usage: roundUsage,
+                    interrupted: false,
+                    logID: await client.lastTrace?.logID,
+                    toolCalls: orderedToolCalls
+                )
+
+                do {
+                    try await store.append(assistantMsg, to: conversationID)
+                    currentParentID = assistantMsg.id
+                    currentMessages.append(assistantMsg)
+                } catch {
+                    failure = .protocolError("The assistant tool call message could not be saved.")
+                    break
+                }
+
+                if Task.isCancelled {
+                    failure = .cancelled
+                    break
+                }
+
+                // Execute tool calls via ToolRunner.
+                let executionResults = await toolRunner.execute(
+                    toolCalls: orderedToolCalls,
+                    round: round,
+                    onSearching: { query in
+                        Task { @MainActor in events.searching?(query) }
+                    }
+                )
+
+                if Task.isCancelled {
+                    failure = .cancelled
+                    break
+                }
+
+                // Commit tool result messages in deterministic index order (R2.5).
+                for result in executionResults {
+                    let toolMsg = Message(
+                        parentID: currentParentID,
+                        role: .tool,
+                        content: [.text(result.content)],
+                        toolCallID: result.toolCallID,
+                        sources: result.results.isEmpty ? nil : result.results
+                    )
+                    do {
+                        try await store.append(toolMsg, to: conversationID)
+                        currentParentID = toolMsg.id
+                        currentMessages.append(toolMsg)
+                        allSources.append(contentsOf: result.results)
+                    } catch {
+                        failure = .protocolError("The tool response message could not be saved.")
+                        break
+                    }
+                }
+
+                if Task.isCancelled || failure != nil {
+                    break
+                }
+
+                // Prepare next round request with updated message history.
+                currentRequest.messages = currentMessages
+                round += 1
+                continue
+            } else {
+                // Final answer or non-tool completion.
+                let cumulativeUsage: Usage? = (totalPromptTokens > 0 || totalCompletionTokens > 0)
+                    ? Usage(
+                        promptTokens: totalPromptTokens,
+                        completionTokens: totalCompletionTokens,
+                        totalTokens: Usage.clampedSum(totalPromptTokens, totalCompletionTokens)
+                    )
+                    : roundUsage
+
+                let trace = await client.lastTrace
+                var outcome = GenerationOutcome(
+                    finishReason: finishReason,
+                    usage: cumulativeUsage,
+                    error: failure,
+                    trace: trace
+                )
+
+                let clean = failure == nil && (finishReason?.isClean ?? false)
+                if !text.isEmpty || !reasoning.isEmpty || !allSources.isEmpty {
+                    let message = Message(
+                        parentID: currentParentID,
+                        role: .assistant,
+                        content: [.text(text)],
+                        reasoning: reasoning.isEmpty ? nil : reasoning,
+                        model: responseModel ?? currentRequest.model,
+                        finishReason: finishReason ?? .truncated,
+                        usage: cumulativeUsage,
+                        interrupted: !clean,
+                        logID: outcome.trace?.logID,
+                        sources: allSources.isEmpty ? nil : allSources
+                    )
+                    do {
+                        try await store.append(message, to: conversationID)
+                        outcome.committed = message
+                    } catch {
+                        outcome.error = outcome.error ?? .protocolError("The response could not be saved.")
+                    }
+                } else {
+                    try? await store.clearCheckpoint(conversationID)
+                }
+
+                finalOutcome = outcome
+                break
+            }
         }
-        return outcome
+
+        if let finalOutcome {
+            return finalOutcome
+        }
+
+        return GenerationOutcome(
+            finishReason: .truncated,
+            usage: nil,
+            error: .cancelled,
+            trace: await client.lastTrace
+        )
     }
 }

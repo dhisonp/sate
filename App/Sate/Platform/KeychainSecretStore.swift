@@ -1,19 +1,19 @@
 import Foundation
 import Security
 
-/// The Cloudflare API token, and nothing else, in the Keychain.
+/// Keychain-backed store for secrets (Cloudflare API token and Search API token).
 ///
-/// `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` is deliberate (R2.11): the
-/// token never leaves the device and never rides an iCloud Keychain sync or an
-/// encrypted backup, so a restore onto a new device requires re-entering it.
-/// That is the intended trade for an account-wide credential.
+/// `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` is deliberate (R2.11 / R1.3): the
+/// tokens never leave the device and never ride an iCloud Keychain sync or an
+/// encrypted backup, so a restore onto a new device requires re-entering them.
 ///
 /// A struct with no stored state, so it is trivially `Sendable` and safe to hand
-/// to any isolation domain. The token is never logged, never interpolated into
-/// an error, and never copied into a `NetworkTrace`.
+/// to any isolation domain. Tokens are never logged, never interpolated into
+/// errors, and never copied into a `NetworkTrace`.
 struct KeychainSecretStore: SecretStore {
     static let service = "com.dhison.sate"
-    static let account = "cloudflare-token"
+    static let cloudflareAccount = "cloudflare-token"
+    static let searchAccount = "google-token"
 
     enum Failure: Error, Equatable {
         case keychain(OSStatus)
@@ -21,22 +21,39 @@ struct KeychainSecretStore: SecretStore {
 
     init() {}
 
-    private var query: [String: Any] {
+    func token() throws -> String? {
+        try get(account: Self.cloudflareAccount)
+    }
+
+    func setToken(_ token: String?) throws {
+        try set(token, account: Self.cloudflareAccount)
+    }
+
+    func searchToken() throws -> String? {
+        try get(account: Self.searchAccount)
+    }
+
+    func setSearchToken(_ token: String?) throws {
+        try set(token, account: Self.searchAccount)
+    }
+
+    // MARK: - Internals
+
+    private func query(for account: String) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.service,
-            kSecAttrAccount as String: Self.account,
+            kSecAttrAccount as String: account,
         ]
     }
 
-    func token() throws -> String? {
-        var lookup = query
+    private func get(account: String) throws -> String? {
+        var lookup = query(for: account)
         lookup[kSecReturnData as String] = true
         lookup[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var item: CFTypeRef?
         let status = SecItemCopyMatching(lookup as CFDictionary, &item)
-        // "Nothing stored yet" is the normal first-launch state, not a failure.
         if status == errSecItemNotFound {
             return nil
         }
@@ -47,9 +64,10 @@ struct KeychainSecretStore: SecretStore {
         return value
     }
 
-    func setToken(_ token: String?) throws {
+    private func set(_ token: String?, account: String) throws {
+        let baseQuery = query(for: account)
         guard let token, !token.isEmpty else {
-            let status = SecItemDelete(query as CFDictionary)
+            let status = SecItemDelete(baseQuery as CFDictionary)
             guard status == errSecSuccess || status == errSecItemNotFound else {
                 throw Failure.keychain(status)
             }
@@ -61,16 +79,13 @@ struct KeychainSecretStore: SecretStore {
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
         ]
 
-        // Update first: `SecItemAdd` on an existing item fails with
-        // `errSecDuplicateItem`, and deleting-then-adding would leave a window
-        // where a rotation that fails halfway has removed the working token.
-        let updated = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        let updated = SecItemUpdate(baseQuery as CFDictionary, attributes as CFDictionary)
         if updated == errSecSuccess {
             return
         }
         guard updated == errSecItemNotFound else { throw Failure.keychain(updated) }
 
-        var insert = query
+        var insert = baseQuery
         insert.merge(attributes) { _, new in new }
         let status = SecItemAdd(insert as CFDictionary, nil)
         guard status == errSecSuccess else { throw Failure.keychain(status) }

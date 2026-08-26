@@ -279,12 +279,44 @@ enum MarkdownInline {
     /// `returnPartiallyParsedIfPossible` plus the `??` fallback guarantee that a
     /// half-written emphasis run or a stray bracket from a partial stream renders
     /// as literal text rather than blanking the message.
-    static func attributed(_ source: String) -> AttributedString {
+    static func attributed(_ source: String, sources: [SearchResult]? = nil) -> AttributedString {
+        let prepared = prepareCitations(source, sources: sources)
         var options = AttributedString.MarkdownParsingOptions()
         options.interpretedSyntax = .inlineOnlyPreservingWhitespace
         options.allowsExtendedAttributes = true
         options.failurePolicy = .returnPartiallyParsedIfPossible
-        return (try? AttributedString(markdown: source, options: options)) ?? AttributedString(source)
+        return (try? AttributedString(markdown: prepared, options: options)) ?? AttributedString(source)
+    }
+
+    /// Links `[n]` citation markers to their corresponding source URLs (R4.4).
+    private static func prepareCitations(_ text: String, sources: [SearchResult]?) -> String {
+        guard let sources, !sources.isEmpty else { return text }
+        // Match [1], [2], etc. that are not already markdown links or code spans
+        guard let regex = try? NSRegularExpression(pattern: #"(?<!\[|\`|\\)\[([1-9][0-9]?)\](?!\(|\`|\])"#) else {
+            return text
+        }
+        let range = NSRange(text.startIndex..., in: text)
+        let matches = regex.matches(in: text, range: range)
+        guard !matches.isEmpty else { return text }
+
+        var result = ""
+        var lastIndex = text.startIndex
+
+        for match in matches {
+            guard let matchRange = Range(match.range, in: text),
+                  let numRange = Range(match.range(at: 1), in: text),
+                  let num = Int(text[numRange]),
+                  sources.indices.contains(num - 1)
+            else { continue }
+
+            let url = sources[num - 1].url
+            result += text[lastIndex ..< matchRange.lowerBound]
+            result += "[\(num)](\(url))"
+            lastIndex = matchRange.upperBound
+        }
+
+        result += text[lastIndex...]
+        return result
     }
 }
 
@@ -327,6 +359,7 @@ enum MarkdownCache {
 /// this — see `StreamingMessageView`.
 struct MarkdownBlocksView: View, Equatable {
     let source: String
+    var sources: [SearchResult]?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -341,12 +374,12 @@ struct MarkdownBlocksView: View, Equatable {
     private func view(for block: MarkdownBlock) -> some View {
         switch block.kind {
         case let .paragraph(text):
-            Text(MarkdownInline.attributed(text))
+            Text(MarkdownInline.attributed(text, sources: sources))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
         case let .heading(level, text):
-            Text(MarkdownInline.attributed(text))
+            Text(MarkdownInline.attributed(text, sources: sources))
                 .font(headingFont(level))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)

@@ -2,13 +2,15 @@ import SwiftUI
 
 /// Everything the user can configure.
 ///
-/// The API token is **write-only** here: it lives in the Keychain and is never
-/// read back into the UI. The field shows whether one is stored, never its value.
+/// API tokens are **write-only** here: they live in the Keychain and are never
+/// read back into the UI. The fields show whether a token is stored, never its value.
 struct SettingsView: View {
     @Environment(AppEnvironment.self) private var env
 
     @State private var tokenEntry = ""
     @State private var hasStoredToken = false
+    @State private var searchTokenEntry = ""
+    @State private var hasStoredSearchToken = false
     @State private var isTemperatureEnabled = false
 
     var body: some View {
@@ -35,6 +37,23 @@ struct SettingsView: View {
             }
 
             Section {
+                LabeledContent("Status") {
+                    if hasStoredToken {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            Text("Saved in Keychain")
+                        }
+                    } else {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.circle")
+                                .foregroundStyle(.secondary)
+                            Text("Not configured")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
                 // SecureField bound to a scratch string: the stored token is
                 // never fetched for display, only replaced or cleared.
                 SecureField(hasStoredToken ? "•••• set — enter to replace" : "API token", text: $tokenEntry)
@@ -70,12 +89,77 @@ struct SettingsView: View {
             }
 
             Section {
+                Picker("Provider", selection: $env.settings.searchProvider) {
+                    ForEach(SearchProviderType.allCases, id: \.self) { provider in
+                        Text(provider.displayName).tag(provider)
+                    }
+                }
+
+                LabeledContent("Status") {
+                    if hasStoredSearchToken {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            Text("Saved in Keychain")
+                        }
+                    } else {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.circle")
+                                .foregroundStyle(.secondary)
+                            Text("Not configured")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                SecureField(
+                    hasStoredSearchToken ? "•••• set — enter to replace" : "Google Search API Key",
+                    text: $searchTokenEntry
+                )
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+                Button("Save Search Key") {
+                    env.setSearchToken(searchTokenEntry)
+                    searchTokenEntry = ""
+                    hasStoredSearchToken = env.searchToken() != nil
+                }
+                .disabled(searchTokenEntry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                if hasStoredSearchToken {
+                    Button("Remove Search Key", role: .destructive) {
+                        env.setSearchToken(nil)
+                        searchTokenEntry = ""
+                        hasStoredSearchToken = false
+                    }
+                }
+
+                Toggle("Search by default", isOn: $env.settings.searchEnabledByDefault)
+
+                Stepper("Max search rounds: \(env.settings.maxSearchRounds)", value: $env.settings.maxSearchRounds, in: 1 ... 5)
+
+                Stepper("Results per query: \(env.settings.searchResultsPerQuery)", value: $env.settings.searchResultsPerQuery, in: 1 ... 8)
+            } header: {
+                Text("Web Search")
+            } footer: {
+                Text("""
+                Uses the Google Search API directly from device. The key is stored \
+                in the Keychain. A search failure will never block chat.
+                """)
+            }
+
+            Section {
                 ModelField(title: "Default model", model: $env.settings.defaultModel)
                 ModelField(title: "Title model", model: $env.settings.titleModel)
             } header: {
                 Text("Models")
             } footer: {
-                Text("The list is Cloudflare's own @cf models: they run on Workers AI, so they need no provider key of yours. Custom takes any provider/model string the gateway resolves. The title model is used only for auto-naming conversations.")
+                Text("""
+                The list is Cloudflare's own @cf models: they run on Workers AI, \
+                so they need no provider key of yours. Custom takes any provider/model \
+                string the gateway resolves. The title model is used only for auto-naming \
+                conversations.
+                """)
             }
 
             Section {
@@ -86,15 +170,19 @@ struct SettingsView: View {
                 )
                 .lineLimit(3 ... 12)
 
-                if env.settings.systemPrompt != SystemPrompt.researchAssistant {
+                if env.settings.systemPrompt != SystemPrompt.generalAssistant {
                     Button("Restore Default Prompt") {
-                        env.settings.systemPrompt = SystemPrompt.researchAssistant
+                        env.settings.systemPrompt = SystemPrompt.generalAssistant
                     }
                 }
             } header: {
                 Text("System Prompt")
             } footer: {
-                Text("\(SystemPrompt.currentDateToken) is replaced with today's date on every send. Sate has no web access, so the default prompt tells the model to say what it last knew and when, rather than presenting stale facts as current.")
+                Text("""
+                \(SystemPrompt.currentDateToken) is replaced with today's date on every send. \
+                The default prompt instructs the model to provide direct, concise answers \
+                and state what it last knew when relevant.
+                """)
             }
 
             Section {
@@ -102,6 +190,12 @@ struct SettingsView: View {
                     TextField("4096", value: $env.settings.maxTokens, format: .number)
                         .keyboardType(.numberPad)
                         .multilineTextAlignment(.trailing)
+                }
+
+                Picker("Thinking", selection: $env.settings.thinkingLevel) {
+                    ForEach(ThinkingLevel.allCases, id: \.self) { level in
+                        Text(level.displayName).tag(level)
+                    }
                 }
 
                 Toggle("Set temperature", isOn: $isTemperatureEnabled)
@@ -122,23 +216,36 @@ struct SettingsView: View {
             } header: {
                 Text("Generation")
             } footer: {
-                Text("Max tokens is always sent — several providers default to a small or unbounded value. Leaving temperature unset omits the field so the provider default applies, which is not the same as sending 0.")
+                Text("""
+                Max tokens is always sent — several providers default to a small or \
+                unbounded value. Thinking level controls reasoning effort before \
+                answering; higher levels spend more tokens and time, while Off \
+                omits the parameter. Leaving temperature unset omits the field so the \
+                provider default applies, which is not the same as sending 0.
+                """)
             }
 
             Section {
                 Toggle("Report token usage", isOn: $env.settings.includeUsage)
                 Toggle("Keep payloads in gateway log", isOn: $env.settings.collectLogPayload)
+                Toggle("Always search first turn", isOn: $env.settings.alwaysSearchFirstTurn)
                 Toggle("Show debug panel", isOn: $env.settings.showDebugPanel)
             } header: {
                 Text("Diagnostics")
             } footer: {
-                Text("Usage reporting requests stream_options.include_usage — without it there are no prompt-token counts to calibrate context estimates from. Turning off payload logging keeps prompts and responses out of the Cloudflare log viewer.")
+                Text("""
+                Usage reporting requests stream_options.include_usage — without it \
+                there are no prompt-token counts to calibrate context estimates from. \
+                Turning off payload logging keeps prompts and responses out of the \
+                Cloudflare log viewer.
+                """)
             }
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             hasStoredToken = env.token() != nil
+            hasStoredSearchToken = env.searchToken() != nil
             isTemperatureEnabled = env.settings.temperature != nil
         }
         .onChange(of: isTemperatureEnabled) { _, enabled in
