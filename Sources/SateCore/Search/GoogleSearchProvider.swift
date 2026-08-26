@@ -2,25 +2,19 @@ import Foundation
 
 /// Google Custom Search API provider (`www.googleapis.com/customsearch/v1`).
 ///
-/// Uses `key` and `cx` (Search Engine ID) as query parameters.
-/// Note: The `searchToken` from the `SecretStore` is used as the Google API Key.
-/// A hardcoded `cx` is used for now, but in a real scenario, this should be configurable.
+/// Uses `key` (API Key from SecretStore) and `cx` (Programmable Search Engine ID).
 public struct GoogleSearchProvider: SearchProvider, Sendable {
     public static let endpoint = URL(string: "https://www.googleapis.com/customsearch/v1")!
     public static let defaultTimeout: TimeInterval = 8.0
     public static let maxSnippetCharacters = 2048
 
-    /// The Search Engine ID (cx).
-    /// In a real production app, this would be a setting.
-    public static let searchEngineId = "012345678901234567890" // Placeholder
-
     private let apiKey: String
     private let cx: String
     private let session: URLSession
 
-    public init(apiKey: String, cx: String = Self.searchEngineId, session: URLSession? = nil) {
+    public init(apiKey: String, cx: String = "", session: URLSession? = nil) {
         self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.cx = cx
+        self.cx = cx.trimmingCharacters(in: .whitespacesAndNewlines)
         if let session {
             self.session = session
         } else {
@@ -34,6 +28,9 @@ public struct GoogleSearchProvider: SearchProvider, Sendable {
     public func search(_ query: String, limit: Int = 5) async throws -> [SearchResult] {
         guard !apiKey.isEmpty else {
             throw SearchError.missingToken
+        }
+        guard !cx.isEmpty else {
+            throw SearchError.unauthorized("Google Search Engine ID (cx) is not configured in Settings.")
         }
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else {
@@ -77,15 +74,28 @@ public struct GoogleSearchProvider: SearchProvider, Sendable {
         case 200:
             return try parseResults(data: data)
         case 400:
-            throw SearchError.invalidResponse
+            let msg = parseErrorMessage(from: data) ?? "Request contains an invalid argument (check query and Search Engine ID cx)."
+            throw SearchError.httpError(statusCode: 400, message: msg)
         case 401, 403:
-            throw SearchError.unauthorized("Google Search API key is invalid or unauthorized.")
+            let msg = parseErrorMessage(from: data) ?? "Google Search API key is invalid or unauthorized."
+            throw SearchError.unauthorized(msg)
         case 429:
-            throw SearchError.rateLimited("Google Search rate limit exceeded.")
+            let msg = parseErrorMessage(from: data) ?? "Google Search rate limit exceeded."
+            throw SearchError.rateLimited(msg)
         default:
-            let message = String(data: data, encoding: .utf8) ?? "HTTP \(httpResponse.statusCode)"
+            let message = parseErrorMessage(from: data) ?? (String(data: data, encoding: .utf8) ?? "HTTP \(httpResponse.statusCode)")
             throw SearchError.httpError(statusCode: httpResponse.statusCode, message: message)
         }
+    }
+
+    private func parseErrorMessage(from data: Data) -> String? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let errorObj = root["error"] as? [String: Any],
+              let message = errorObj["message"] as? String
+        else {
+            return nil
+        }
+        return message
     }
 
     private func parseResults(data: Data) throws -> [SearchResult] {
@@ -127,8 +137,6 @@ public struct GoogleSearchProvider: SearchProvider, Sendable {
     private func parseDate(from pagemap: [String: Any]?) -> Date? {
         guard let pagemap = pagemap else { return nil }
 
-        // Google Custom Search results often put dates in various places within 'pagemap'
-        // e.g., metatags -> article:published_time
         let metatags = pagemap["metatags"] as? [[String: Any]]
         let dateString = metatags?.first?["article:published_time"] as? String
             ?? metatags?.first?["date"] as? String
@@ -136,7 +144,6 @@ public struct GoogleSearchProvider: SearchProvider, Sendable {
 
         guard let dateStr = dateString, !dateStr.isEmpty else { return nil }
 
-        // Try several formats
         let formats = [
             ISO8601DateFormatter(),
             {

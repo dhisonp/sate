@@ -24,6 +24,7 @@ money, or correctness. *Minor*: misleading but bounded.
 | [9](#9) | Major | Model | `.truncated` did not round-trip through persistence |
 | [10](#10) | Minor | Codec | `extra["max_tokens"] = null` unbounded the bill |
 | [11](#11) | Minor | Docs | `SessionEntry.unknown` promised what it did not do |
+| [12](#12) | Major | Secrets | Keychain write failure was swallowed and cached unconditionally |
 
 ---
 
@@ -271,6 +272,21 @@ that comment would have found the payload empty.
 
 **Fix.** Corrected the comment to state what actually happens: the entry is
 skipped on load and left untouched on disk.
+
+---
+
+<a id="12"></a>
+## 12. Keychain write failure was swallowed and cached unconditionally
+
+**Severity** Major · **Where** `App/Sate/State/AppEnvironment.swift:196`, `App/Sate/Platform/KeychainSecretStore.swift:67`
+
+`setToken` and `setSearchToken` used `try? secrets.setToken(...)` and unconditionally assigned `cachedToken = value`.
+
+**Failure scenario.** A Keychain write failure was silently discarded. The in-memory cache was updated anyway, so the live client worked for the remainder of the session and Settings displayed a false "Saved in Keychain" status. On the next process launch (or after `build.sh`/`run.sh`), `AppEnvironment.init` read the unpopulated Keychain and returned `nil`, dropping all configured credentials.
+
+**Fix.** Made `setToken` and `setSearchToken` throwing, update cache only after successful write, surfaced errors in `SettingsView`, hardened `KeychainSecretStore.set` to delete-then-add, eliminated double Keychain reads in `init`, and replaced per-process randomized `hashValue` in configuration signature with a deterministic token fingerprint.
+
+**Test** `SecretStoreTests.swift` — token lifecycle, search token lifecycle, and error propagation under failing store.
 
 ---
 

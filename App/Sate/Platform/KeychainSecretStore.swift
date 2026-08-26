@@ -66,27 +66,16 @@ struct KeychainSecretStore: SecretStore {
 
     private func set(_ token: String?, account: String) throws {
         let baseQuery = query(for: account)
-        guard let token, !token.isEmpty else {
-            let status = SecItemDelete(baseQuery as CFDictionary)
-            guard status == errSecSuccess || status == errSecItemNotFound else {
-                throw Failure.keychain(status)
-            }
-            return
+        let deleteStatus = SecItemDelete(baseQuery as CFDictionary)
+        guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else {
+            throw Failure.keychain(deleteStatus)
         }
 
-        let attributes: [String: Any] = [
-            kSecValueData as String: Data(token.utf8),
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-        ]
-
-        let updated = SecItemUpdate(baseQuery as CFDictionary, attributes as CFDictionary)
-        if updated == errSecSuccess {
-            return
-        }
-        guard updated == errSecItemNotFound else { throw Failure.keychain(updated) }
+        guard let token, !token.isEmpty else { return }
 
         var insert = baseQuery
-        insert.merge(attributes) { _, new in new }
+        insert[kSecValueData as String] = Data(token.utf8)
+        insert[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         let status = SecItemAdd(insert as CFDictionary, nil)
         guard status == errSecSuccess else { throw Failure.keychain(status) }
     }

@@ -69,15 +69,17 @@ final class AppEnvironment {
         self.secrets = secrets
         self.defaults = defaults
         self.isMock = isMock
-        cachedToken = try? secrets.token()
-        cachedSearchToken = try? secrets.searchToken()
+        let token = try? secrets.token()
+        let searchToken = try? secrets.searchToken()
+        cachedToken = token
+        cachedSearchToken = searchToken
         urlSession = isMock ? nil : AppEnvironment.makeURLSession()
         if isMock {
             client = MockGatewayClient()
             configurationSignature = "mock"
         } else {
             let configuration = AppEnvironment.configuration(
-                settings: settings, token: (try? secrets.token()) ?? ""
+                settings: settings, token: token ?? ""
             )
             client = GatewayClient(configuration: configuration, session: urlSession)
             configurationSignature = AppEnvironment.signature(configuration)
@@ -193,10 +195,10 @@ final class AppEnvironment {
 
     // MARK: - Token
 
-    func setToken(_ token: String?) {
+    func setToken(_ token: String?) throws {
         let trimmed = token?.trimmingCharacters(in: .whitespacesAndNewlines)
         let value = (trimmed?.isEmpty ?? true) ? nil : trimmed
-        try? secrets.setToken(value)
+        try secrets.setToken(value)
         cachedToken = value
         rebuildClientIfNeeded()
     }
@@ -205,10 +207,10 @@ final class AppEnvironment {
         cachedToken
     }
 
-    func setSearchToken(_ token: String?) {
+    func setSearchToken(_ token: String?) throws {
         let trimmed = token?.trimmingCharacters(in: .whitespacesAndNewlines)
         let value = (trimmed?.isEmpty ?? true) ? nil : trimmed
-        try? secrets.setSearchToken(value)
+        try secrets.setSearchToken(value)
         cachedSearchToken = value
     }
 
@@ -220,7 +222,7 @@ final class AppEnvironment {
         if isMock {
             return MockSearchProvider()
         }
-        return GoogleSearchProvider(apiKey: cachedSearchToken ?? "")
+        return GoogleSearchProvider(apiKey: cachedSearchToken ?? "", cx: settings.googleSearchEngineID)
     }
 
     // MARK: - Estimator
@@ -269,9 +271,19 @@ final class AppEnvironment {
         [
             configuration.accountID,
             configuration.gatewayID ?? "",
-            String(configuration.token.hashValue),
+            tokenFingerprint(configuration.token),
             String(configuration.collectLogPayload),
         ].joined(separator: "|")
+    }
+
+    private static func tokenFingerprint(_ token: String) -> String {
+        guard !token.isEmpty else { return "0" }
+        var hash: UInt64 = 0xCBF2_9CE4_8422_2325
+        for byte in token.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 0x100_0000_01B3
+        }
+        return String(hash, radix: 16)
     }
 
     /// One session for the whole process. `GatewayClient` would happily make its

@@ -78,7 +78,7 @@ struct SearchProviderTests {
               "pagemap": {
                 "metatags": [
                   {
-                    "og:site_name": "developer.apple.com"
+                    "date": "2026-02-01"
                   }
                 ]
               }
@@ -88,9 +88,8 @@ struct SearchProviderTests {
         """#
 
         StubSearchURLProtocol.install { request in
+            #expect(request.url?.query()?.contains("key=test-token") == true)
             #expect(request.url?.query()?.contains("q=swift") == true)
-            #expect(request.url?.query()?.contains("key=") == true)
-            #expect(request.url?.query()?.contains("cx=") == true)
             guard let url = request.url,
                   let response = HTTPURLResponse(
                       url: url,
@@ -104,7 +103,7 @@ struct SearchProviderTests {
             return (response, Data(json.utf8))
         }
 
-        let provider = GoogleSearchProvider(apiKey: "test-token", session: session)
+        let provider = GoogleSearchProvider(apiKey: "test-token", cx: "test-cx", session: session)
         let results = try await provider.search("swift", limit: 5)
 
         #expect(results.count == 2)
@@ -136,7 +135,7 @@ struct SearchProviderTests {
             return (response, Data(#"{"items":[]}"#.utf8))
         }
 
-        let provider = GoogleSearchProvider(apiKey: "test-token", session: session)
+        let provider = GoogleSearchProvider(apiKey: "test-token", cx: "test-cx", session: session)
         let results = try await provider.search("nonexistent query", limit: 5)
         #expect(results.isEmpty)
     }
@@ -150,15 +149,15 @@ struct SearchProviderTests {
                       url: url,
                       statusCode: 429,
                       httpVersion: nil,
-                      headerFields: nil
+                      headerFields: ["Content-Type": "application/json"]
                   )
             else {
                 throw URLError(.badServerResponse)
             }
-            return (response, Data("Rate limit exceeded".utf8))
+            return (response, Data(#"{"error":{"message":"Rate limit exceeded"}}"#.utf8))
         }
 
-        let provider = GoogleSearchProvider(apiKey: "test-token", session: session)
+        let provider = GoogleSearchProvider(apiKey: "test-token", cx: "test-cx", session: session)
         await #expect(throws: SearchError.self) {
             _ = try await provider.search("query", limit: 5)
         }
@@ -173,15 +172,15 @@ struct SearchProviderTests {
                       url: url,
                       statusCode: 401,
                       httpVersion: nil,
-                      headerFields: nil
+                      headerFields: ["Content-Type": "application/json"]
                   )
             else {
                 throw URLError(.badServerResponse)
             }
-            return (response, Data("Invalid token".utf8))
+            return (response, Data(#"{"error":{"message":"Invalid token"}}"#.utf8))
         }
 
-        let provider = GoogleSearchProvider(apiKey: "bad-token", session: session)
+        let provider = GoogleSearchProvider(apiKey: "bad-token", cx: "test-cx", session: session)
         await #expect(throws: SearchError.self) {
             _ = try await provider.search("query", limit: 5)
         }
@@ -194,7 +193,7 @@ struct SearchProviderTests {
             throw URLError(.timedOut)
         }
 
-        let provider = GoogleSearchProvider(apiKey: "test-token", session: session)
+        let provider = GoogleSearchProvider(apiKey: "test-token", cx: "test-cx", session: session)
         await #expect(throws: SearchError.timeout) {
             _ = try await provider.search("query", limit: 5)
         }
@@ -204,6 +203,14 @@ struct SearchProviderTests {
     func missingToken() async throws {
         let provider = GoogleSearchProvider(apiKey: "")
         await #expect(throws: SearchError.missingToken) {
+            _ = try await provider.search("query", limit: 5)
+        }
+    }
+
+    @Test("Missing cx throws SearchError.unauthorized immediately")
+    func missingCx() async throws {
+        let provider = GoogleSearchProvider(apiKey: "test-token", cx: "")
+        await #expect(throws: SearchError.self) {
             _ = try await provider.search("query", limit: 5)
         }
     }

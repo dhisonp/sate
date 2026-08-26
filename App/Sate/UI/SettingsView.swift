@@ -9,8 +9,10 @@ struct SettingsView: View {
 
     @State private var tokenEntry = ""
     @State private var hasStoredToken = false
+    @State private var tokenError: String?
     @State private var searchTokenEntry = ""
     @State private var hasStoredSearchToken = false
+    @State private var searchTokenError: String?
     @State private var isTemperatureEnabled = false
 
     var body: some View {
@@ -54,6 +56,12 @@ struct SettingsView: View {
                     }
                 }
 
+                if let tokenError {
+                    Text(tokenError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
                 // SecureField bound to a scratch string: the stored token is
                 // never fetched for display, only replaced or cleared.
                 SecureField(hasStoredToken ? "•••• set — enter to replace" : "API token", text: $tokenEntry)
@@ -61,17 +69,27 @@ struct SettingsView: View {
                     .autocorrectionDisabled()
 
                 Button("Save Token") {
-                    env.setToken(tokenEntry)
-                    tokenEntry = ""
-                    hasStoredToken = env.token() != nil
+                    do {
+                        try env.setToken(tokenEntry)
+                        tokenEntry = ""
+                        hasStoredToken = env.token() != nil
+                        tokenError = nil
+                    } catch {
+                        tokenError = "Failed to save token to Keychain: \(error.localizedDescription)"
+                    }
                 }
                 .disabled(tokenEntry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 if hasStoredToken {
                     Button("Remove Token", role: .destructive) {
-                        env.setToken(nil)
-                        tokenEntry = ""
-                        hasStoredToken = false
+                        do {
+                            try env.setToken(nil)
+                            tokenEntry = ""
+                            hasStoredToken = false
+                            tokenError = nil
+                        } catch {
+                            tokenError = "Failed to remove token from Keychain: \(error.localizedDescription)"
+                        }
                     }
                 }
             } header: {
@@ -112,6 +130,12 @@ struct SettingsView: View {
                     }
                 }
 
+                if let searchTokenError {
+                    Text(searchTokenError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
                 SecureField(
                     hasStoredSearchToken ? "•••• set — enter to replace" : "Google Search API Key",
                     text: $searchTokenEntry
@@ -120,18 +144,35 @@ struct SettingsView: View {
                 .autocorrectionDisabled()
 
                 Button("Save Search Key") {
-                    env.setSearchToken(searchTokenEntry)
-                    searchTokenEntry = ""
-                    hasStoredSearchToken = env.searchToken() != nil
+                    do {
+                        try env.setSearchToken(searchTokenEntry)
+                        searchTokenEntry = ""
+                        hasStoredSearchToken = env.searchToken() != nil
+                        searchTokenError = nil
+                    } catch {
+                        searchTokenError = "Failed to save search key to Keychain: \(error.localizedDescription)"
+                    }
                 }
                 .disabled(searchTokenEntry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 if hasStoredSearchToken {
                     Button("Remove Search Key", role: .destructive) {
-                        env.setSearchToken(nil)
-                        searchTokenEntry = ""
-                        hasStoredSearchToken = false
+                        do {
+                            try env.setSearchToken(nil)
+                            searchTokenEntry = ""
+                            hasStoredSearchToken = false
+                            searchTokenError = nil
+                        } catch {
+                            searchTokenError = "Failed to remove search key from Keychain: \(error.localizedDescription)"
+                        }
                     }
+                }
+
+                LabeledContent("Search Engine ID (cx)") {
+                    TextField("cx identifier", text: $env.settings.googleSearchEngineID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .multilineTextAlignment(.trailing)
                 }
 
                 Toggle("Search by default", isOn: $env.settings.searchEnabledByDefault)
@@ -143,8 +184,9 @@ struct SettingsView: View {
                 Text("Web Search")
             } footer: {
                 Text("""
-                Uses the Google Search API directly from device. The key is stored \
-                in the Keychain. A search failure will never block chat.
+                Uses the Google Custom Search API directly from device. Requires an API Key \
+                and a Search Engine ID (cx) from Google Programmable Search Engine. \
+                The key is stored securely in the Keychain.
                 """)
             }
 
