@@ -57,7 +57,12 @@ private struct RootView: View {
     /// a real streaming response deterministically. Inert unless SATE_DEMO=1.
     private func runDemoIfRequested() async {
         let environmentValues = ProcessInfo.processInfo.environment
-        guard environmentValues["SATE_DEMO"] == "1", let id = await env.newConversation() else { return }
+        guard environmentValues["SATE_DEMO"] == "1" else { return }
+        if environmentValues["SATE_DEMO_SCREEN"] == "settings" {
+            path = [.settings]
+            return
+        }
+        guard let id = await env.newConversation() else { return }
         path = [.chat(id)]
         let vm = env.viewModel(for: id)
         await vm.load()

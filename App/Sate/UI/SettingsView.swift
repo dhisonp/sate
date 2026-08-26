@@ -94,8 +94,16 @@ struct SettingsView: View {
                     text: $env.settings.systemPrompt,
                     axis: .vertical)
                     .lineLimit(3...12)
+
+                if env.settings.systemPrompt != SystemPrompt.researchAssistant {
+                    Button("Restore Default Prompt") {
+                        env.settings.systemPrompt = SystemPrompt.researchAssistant
+                    }
+                }
             } header: {
                 Text("System Prompt")
+            } footer: {
+                Text("\(SystemPrompt.currentDateToken) is replaced with today's date on every send. Sate has no web access, so the default prompt tells the model to say what it last knew and when, rather than presenting stale facts as current.")
             }
 
             Section {

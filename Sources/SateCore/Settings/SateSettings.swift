@@ -33,7 +33,7 @@ public struct SateSettings: Codable, Sendable, Hashable {
         gatewayID = ""
         defaultModel = "anthropic/claude-opus-5"
         titleModel = "openai/gpt-5.2-mini"
-        systemPrompt = ""
+        systemPrompt = SystemPrompt.researchAssistant
         temperature = nil
         maxTokens = 4096
         includeUsage = true

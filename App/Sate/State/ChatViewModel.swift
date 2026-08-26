@@ -246,10 +246,14 @@ final class ChatViewModel {
         let settings = environment.settings
         let window = settings.window(for: model)
         let builder = ContextBuilder(estimator: environment.estimator)
+        // Resolved per send, not when the prompt was saved: a prompt stored in
+        // Settings weeks ago must still report today's date, or the model
+        // reasons about "now" as of its training cutoff.
+        let systemPrompt = SystemPrompt.resolve(settings.systemPrompt)
         let context = shrunk
             ? builder.rebuild(
-                branch: branch, systemPrompt: settings.systemPrompt, window: window, shrinkTo: 0.75)
-            : builder.build(branch: branch, systemPrompt: settings.systemPrompt, window: window)
+                branch: branch, systemPrompt: systemPrompt, window: window, shrinkTo: 0.75)
+            : builder.build(branch: branch, systemPrompt: systemPrompt, window: window)
 
         // The builder already put the system prompt at the head of `messages`, so
         // passing it again here would send it twice.
