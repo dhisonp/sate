@@ -187,7 +187,7 @@ struct SettingsView: View {
 
             Section {
                 LabeledContent("Max tokens") {
-                    TextField("4096", value: $env.settings.maxTokens, format: .number)
+                    TextField("16384", value: $env.settings.maxTokens, format: .number)
                         .keyboardType(.numberPad)
                         .multilineTextAlignment(.trailing)
                 }

@@ -142,16 +142,28 @@ final class AppEnvironment {
         return header.conversationID
     }
 
-    func delete(_ id: UUID) async {
-        if let session = sessions[id] {
-            // Stop the generation before the file goes away, otherwise its commit
-            // would fail against a deleted transcript.
-            await session.cancelAndWait()
+    func delete(_ ids: Set<UUID>) async {
+        guard !ids.isEmpty else { return }
+        for id in ids {
+            if let session = sessions[id] {
+                // Stop the generation before the file goes away, otherwise its commit
+                // would fail against a deleted transcript.
+                await session.cancelAndWait()
+            }
+            sessions[id] = nil
+            viewModels[id] = nil
+            try? await store.delete(id)
         }
-        sessions[id] = nil
-        viewModels[id] = nil
-        try? await store.delete(id)
         await refresh()
+    }
+
+    func delete(_ id: UUID) async {
+        await delete([id])
+    }
+
+    func deleteAll() async {
+        let allIDs = Set(conversations.map(\.id)).union(sessions.keys).union(viewModels.keys)
+        await delete(allIDs)
     }
 
     func viewModel(for id: UUID) -> ChatViewModel {

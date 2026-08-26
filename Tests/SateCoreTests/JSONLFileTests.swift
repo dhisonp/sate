@@ -2,7 +2,7 @@ import Foundation
 @testable import SateCore
 import Testing
 
-@Suite("JSONLFile")
+@Suite("JSONLFile", .serialized)
 struct JSONLFileTests {
     /// Each test gets its own directory so nothing can leak between them, and so
     /// a failing test leaves no state that changes the next run's result.

@@ -9,10 +9,19 @@ struct ConversationListView: View {
 
     @Environment(AppEnvironment.self) private var env
     @State private var isCreating = false
+    @State private var selectedIDs: Set<UUID> = []
+    @State private var editMode: EditMode = .inactive
+    @State private var isShowingBatchDeleteDialog = false
+    @State private var isShowingDeleteAllDialog = false
+
+    private var navigationTitle: String {
+        guard editMode.isEditing else { return "Sate" }
+        return selectedIDs.isEmpty ? "Select Conversations" : "\(selectedIDs.count) Selected"
+    }
 
     var body: some View {
-        List {
-            if env.recoveredCount > 0 {
+        List(selection: $selectedIDs) {
+            if env.recoveredCount > 0 && !editMode.isEditing {
                 Section { recoveryBanner }
             }
 
@@ -34,38 +43,132 @@ struct ConversationListView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("Sate")
+        .environment(\.editMode, $editMode)
+        .navigationTitle(navigationTitle)
         .refreshable { await env.refresh() }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    path.append(.settings)
-                } label: {
-                    Label("Settings", systemImage: "gearshape")
+            if editMode.isEditing {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(selectedIDs.count == env.conversations.count ? "Deselect All" : "Select All") {
+                        if selectedIDs.count == env.conversations.count {
+                            selectedIDs.removeAll()
+                        } else {
+                            selectedIDs = Set(env.conversations.map(\.id))
+                        }
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        editMode = .inactive
+                        selectedIDs.removeAll()
+                    }
+                    .fontWeight(.semibold)
+                }
+                ToolbarItemGroup(placement: .bottomBar) {
+                    Button(role: .destructive) {
+                        isShowingDeleteAllDialog = true
+                    } label: {
+                        Text("Delete All")
+                    }
+                    .disabled(env.conversations.isEmpty)
+
+                    Spacer()
+
+                    Button(role: .destructive) {
+                        isShowingBatchDeleteDialog = true
+                    } label: {
+                        Text(selectedIDs.isEmpty ? "Delete" : "Delete (\(selectedIDs.count))")
+                    }
+                    .disabled(selectedIDs.isEmpty)
+                }
+            } else {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        path.append(.settings)
+                    } label: {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                }
+                // A visible reminder that nothing is hitting the real gateway; the
+                // mock replays a bundled SSE fixture (SATE_MOCK=1).
+                if env.isMock {
+                    ToolbarItem(placement: .principal) {
+                        Text("MOCK")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            // A tint that means something: nothing here is hitting
+                            // the real gateway.
+                            .glassEffect(.regular.tint(.orange.opacity(0.25)), in: .capsule)
+                            .accessibilityLabel("Mock gateway active")
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Edit") {
+                        editMode = .active
+                    }
+                    .disabled(env.conversations.isEmpty)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        createConversation()
+                    } label: {
+                        Label("New Conversation", systemImage: "square.and.pencil")
+                    }
+                    .disabled(isCreating)
                 }
             }
-            // A visible reminder that nothing is hitting the real gateway; the
-            // mock replays a bundled SSE fixture (SATE_MOCK=1).
-            if env.isMock {
-                ToolbarItem(placement: .principal) {
-                    Text("MOCK")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        // A tint that means something: nothing here is hitting
-                        // the real gateway.
-                        .glassEffect(.regular.tint(.orange.opacity(0.25)), in: .capsule)
-                        .accessibilityLabel("Mock gateway active")
+        }
+        .confirmationDialog(
+            "Delete \(selectedIDs.count) Conversation\(selectedIDs.count == 1 ? "" : "s")?",
+            isPresented: $isShowingBatchDeleteDialog,
+            titleVisibility: .visible
+        ) {
+            Button(
+                "Delete \(selectedIDs.count) Conversation\(selectedIDs.count == 1 ? "" : "s")",
+                role: .destructive
+            ) {
+                let targets = selectedIDs
+                selectedIDs.removeAll()
+                Task {
+                    await env.delete(targets)
+                    if env.conversations.isEmpty {
+                        editMode = .inactive
+                    }
                 }
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    createConversation()
-                } label: {
-                    Label("New Conversation", systemImage: "square.and.pencil")
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This action cannot be undone.")
+        }
+        .confirmationDialog(
+            "Delete All Conversations?",
+            isPresented: $isShowingDeleteAllDialog,
+            titleVisibility: .visible
+        ) {
+            Button("Delete All Conversations", role: .destructive) {
+                selectedIDs.removeAll()
+                Task {
+                    await env.deleteAll()
+                    editMode = .inactive
                 }
-                .disabled(isCreating)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will permanently delete all \(env.conversations.count) conversation\(env.conversations.count == 1 ? "" : "s") and cannot be undone.")
+        }
+        .onChange(of: env.conversations) { _, newConversations in
+            let validIDs = Set(newConversations.map(\.id))
+            selectedIDs.formIntersection(validIDs)
+            if newConversations.isEmpty && editMode.isEditing {
+                editMode = .inactive
+                selectedIDs.removeAll()
+            }
+        }
+        .onChange(of: editMode) { _, newMode in
+            if !newMode.isEditing {
+                selectedIDs.removeAll()
             }
         }
     }

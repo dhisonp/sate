@@ -283,7 +283,7 @@ struct SateSettingsTests {
         let settings = SateSettings()
         #expect(settings.defaultModel == "@cf/google/gemma-4-26b-a4b-it")
         #expect(settings.titleModel == "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
-        #expect(settings.maxTokens == 4096)
+        #expect(settings.maxTokens == 16384)
         #expect(settings.includeUsage)
         #expect(settings.collectLogPayload)
         #expect(settings.temperature == nil)

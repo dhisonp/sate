@@ -49,7 +49,7 @@ public struct SateSettings: Codable, Sendable, Hashable {
         systemPromptWithSearch = SystemPrompt.generalAssistantWithSearch
         temperature = nil
         thinkingLevel = .off
-        maxTokens = 4096
+        maxTokens = 16384
         includeUsage = true
         collectLogPayload = true
         contextWindows = [:]

@@ -2,7 +2,7 @@ import Foundation
 @testable import SateCore
 import Testing
 
-@Suite("ConversationStore")
+@Suite("ConversationStore", .serialized)
 struct ConversationStoreTests {
     /// A fresh directory per test: the store's self-healing index and its
     /// once-per-launch tail repair are both stateful, so tests must not share one.

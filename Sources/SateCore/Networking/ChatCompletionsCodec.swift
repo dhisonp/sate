@@ -108,7 +108,7 @@ public struct ChatCompletionRequest: Sendable, Hashable {
 /// caller coalescing those events itself must let a later observed reason win.
 public struct ChatCompletionsCodec: Sendable {
     /// Conservative ceiling used whenever the caller supplies no `maxTokens`.
-    public static let defaultMaxTokens = 4096
+    public static let defaultMaxTokens = 16384
 
     /// Body keys the codec owns outright. `extra` may tune `max_tokens`,
     /// `temperature` or `stream_options`, but must never be able to retarget the
