@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import Security
 
 /// Keychain-backed store for secrets (Cloudflare API token and Search API token).
@@ -57,7 +58,10 @@ struct KeychainSecretStore: SecretStore {
         if status == errSecItemNotFound {
             return nil
         }
-        guard status == errSecSuccess else { throw Failure.keychain(status) }
+        guard status == errSecSuccess else {
+            Log.keychain.error("SecItemCopyMatching failed: status=\(status) account=\(account, privacy: .public)")
+            throw Failure.keychain(status)
+        }
         guard let data = item as? Data, let value = String(data: data, encoding: .utf8),
               !value.isEmpty
         else { return nil }
@@ -68,15 +72,23 @@ struct KeychainSecretStore: SecretStore {
         let baseQuery = query(for: account)
         let deleteStatus = SecItemDelete(baseQuery as CFDictionary)
         guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else {
+            Log.keychain.error("SecItemDelete failed: status=\(deleteStatus) account=\(account, privacy: .public)")
             throw Failure.keychain(deleteStatus)
         }
 
-        guard let token, !token.isEmpty else { return }
+        guard let token, !token.isEmpty else {
+            Log.keychain.info("Cleared token for account=\(account, privacy: .public)")
+            return
+        }
 
         var insert = baseQuery
         insert[kSecValueData as String] = Data(token.utf8)
         insert[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         let status = SecItemAdd(insert as CFDictionary, nil)
-        guard status == errSecSuccess else { throw Failure.keychain(status) }
+        guard status == errSecSuccess else {
+            Log.keychain.error("SecItemAdd failed: status=\(status) account=\(account, privacy: .public)")
+            throw Failure.keychain(status)
+        }
+        Log.keychain.info("Successfully saved token for account=\(account, privacy: .public)")
     }
 }

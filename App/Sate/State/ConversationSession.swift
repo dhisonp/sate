@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 // MARK: - Producer-side accumulation
 
@@ -118,6 +119,10 @@ actor ConversationSession {
         self.store = store
     }
 
+    deinit {
+        task?.cancel()
+    }
+
     var isGenerating: Bool {
         task != nil
     }
@@ -138,6 +143,9 @@ actor ConversationSession {
         guard task == nil else { return false }
         let conversationID = self.conversationID
         let store = self.store
+        Log.network.info(
+            "Starting generation for conversation=\(conversationID, privacy: .public), model=\(request.model, privacy: .public)"
+        )
         // Detached: the generation must outlive whatever view or task asked for
         // it, and the heavy per-delta loop must not run on this actor's executor.
         task = Task.detached(priority: .userInitiated) { [weak self] in
@@ -163,6 +171,7 @@ actor ConversationSession {
 
     /// Cooperative cancel. The partial is still committed — see `generate`.
     func cancel() {
+        Log.network.info("Cancelling generation for conversation=\(self.conversationID, privacy: .public)")
         task?.cancel()
     }
 
@@ -170,6 +179,7 @@ actor ConversationSession {
     /// (R2.5): cancel → commit interrupted → append new user node → regenerate.
     func cancelAndWait() async {
         guard let task else { return }
+        Log.network.info("Cancel-and-waiting for conversation=\(self.conversationID, privacy: .public)")
         task.cancel()
         await task.value
     }
@@ -269,25 +279,50 @@ actor ConversationSession {
                        !text.isEmpty || !reasoning.isEmpty
                     {
                         lastCheckpoint = Date()
-                        try? await store.checkpoint(
-                            conversationID: conversationID,
-                            parentID: currentParentID,
-                            text: text,
-                            reasoning: reasoning,
-                            model: currentRequest.model
-                        )
+                        let checkpointParentID = currentParentID
+                        let checkpointText = text
+                        let checkpointReasoning = reasoning
+                        let checkpointModel = currentRequest.model
+                        Task.detached(priority: .utility) {
+                            do {
+                                try await store.checkpoint(
+                                    conversationID: conversationID,
+                                    parentID: checkpointParentID,
+                                    text: checkpointText,
+                                    reasoning: checkpointReasoning,
+                                    model: checkpointModel
+                                )
+                                Log.persist.debug(
+                                    "Checkpoint saved for \(conversationID, privacy: .public): text=\(checkpointText.count) chars"
+                                )
+                            } catch {
+                                Log.persist.error(
+                                    "Failed to write checkpoint for \(conversationID, privacy: .public): \(error, privacy: .public)"
+                                )
+                            }
+                        }
                     }
                 }
             } catch let error as GatewayError {
                 failure = error
+                Log.network.error(
+                    "Stream error (round \(round)) for \(conversationID, privacy: .public): \(error, privacy: .public)"
+                )
             } catch is CancellationError {
                 failure = .cancelled
+                Log.network.info("Stream cancelled (round \(round)) for \(conversationID, privacy: .public)")
             } catch {
                 failure = .protocolError("\(error)")
+                Log.network.error(
+                    "Unexpected stream error (round \(round)) for \(conversationID, privacy: .public): \(error, privacy: .public)"
+                )
             }
 
             if failure == nil, Task.isCancelled {
                 failure = .cancelled
+                Log.network.info(
+                    "Stream task cancelled at end of stream loop for \(conversationID, privacy: .public)"
+                )
             }
 
             ticker.cancel()
@@ -336,6 +371,9 @@ actor ConversationSession {
                     currentParentID = assistantMsg.id
                     currentMessages.append(assistantMsg)
                 } catch {
+                    Log.persist.error(
+                        "Failed to append assistant tool call message for \(conversationID, privacy: .public): \(error, privacy: .public)"
+                    )
                     failure = .protocolError("The assistant tool call message could not be saved.")
                     break
                 }
@@ -374,6 +412,9 @@ actor ConversationSession {
                         currentMessages.append(toolMsg)
                         allSources.append(contentsOf: result.results)
                     } catch {
+                        Log.persist.error(
+                            "Failed to append tool message for \(conversationID, privacy: .public): \(error, privacy: .public)"
+                        )
                         failure = .protocolError("The tool response message could not be saved.")
                         break
                     }
@@ -422,13 +463,22 @@ actor ConversationSession {
                     do {
                         try await store.append(message, to: conversationID)
                         outcome.committed = message
+                        Log.persist.info(
+                            "Committed assistant message \(message.id, privacy: .public) for \(conversationID, privacy: .public), text=\(text.count) chars, interrupted=\(message.interrupted)"
+                        )
                     } catch {
+                        Log.persist.error(
+                            "Failed to append final response for \(conversationID, privacy: .public): \(error, privacy: .public)"
+                        )
                         outcome.error = outcome.error ?? .protocolError("The response could not be saved.")
                     }
                 } else {
                     try? await store.clearCheckpoint(conversationID)
                 }
 
+                Log.network.info(
+                    "Generation finished for \(conversationID, privacy: .public): finishReason=\(finishReason?.rawValue ?? "none", privacy: .public), totalTokens=\(cumulativeUsage?.totalTokens ?? 0)"
+                )
                 finalOutcome = outcome
                 break
             }

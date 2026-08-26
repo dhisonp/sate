@@ -70,6 +70,7 @@ struct ChatView: View {
                 // conversation is closed (R2.6). The generation itself keeps
                 // running — it is owned by the store, not by this view.
                 MarkdownCache.clear()
+                env.evictIdleViewModel(for: vm.conversationID)
             }
     }
 
@@ -82,7 +83,7 @@ struct ChatView: View {
                     // A `List` is forbidden here: UICollectionView self-sizing
                     // re-measures a mutating row on every change and the
                     // transcript visibly jumps while tokens land.
-                    ForEach(visibleMessages) { message in
+                    ForEach(vm.visibleMessages) { message in
                         MessageBubble(
                             message: message,
                             siblings: vm.siblings(of: message.id),
@@ -202,18 +203,6 @@ struct ChatView: View {
             parts.append("cached")
         }
         return parts.joined(separator: " · ")
-    }
-
-    private var visibleMessages: [Message] {
-        vm.messages.filter { message in
-            if message.role == .tool {
-                return false
-            }
-            if message.role == .assistant, message.text.isEmpty, !(message.toolCalls?.isEmpty ?? true) {
-                return false
-            }
-            return true
-        }
     }
 
     // MARK: Status area

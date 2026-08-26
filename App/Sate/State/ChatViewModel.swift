@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 /// The send/stream state machine (R2.8). `awaitingFirstToken` is separate from
 /// `sending` because that is the only window where "Thinking… (Ns)" is honest —
@@ -32,6 +33,8 @@ final class ChatViewModel {
     /// Committed turns on the current branch only. The in-flight response is in
     /// `draft` until the session commits it.
     private(set) var messages: [Message] = []
+    /// Filtered visible messages cached to avoid O(n) re-filtering on every view body evaluation.
+    private(set) var visibleMessages: [Message] = []
     let draft = Draft()
     private(set) var phase: ChatPhase = .idle
     var input: String = ""
@@ -104,6 +107,7 @@ final class ChatViewModel {
     private func apply(_ snapshot: ConversationSnapshot) {
         self.snapshot = snapshot
         messages = snapshot.currentBranch
+        recomputeVisibleMessages()
         title = snapshot.header.title
         isApplyingSnapshot = true
         model = snapshot.header.model
@@ -115,6 +119,7 @@ final class ChatViewModel {
     func send() async {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !phase.isBusy else { return }
+        Log.state.info("Send initiated for conversation \(self.conversationID, privacy: .public)")
         input = ""
         guard let user = await commit(Message.user(text, parentID: messages.last?.id)) else {
             // The turn was never persisted, so the text belongs back in the field
@@ -128,6 +133,7 @@ final class ChatViewModel {
 
     func stop() {
         guard phase.isBusy else { return }
+        Log.state.info("Stop requested for conversation \(self.conversationID, privacy: .public)")
         Task { await session.cancel() }
     }
 
@@ -135,6 +141,7 @@ final class ChatViewModel {
     /// a regeneration, which forks rather than overwrites.
     func retry() async {
         guard !phase.isBusy else { return }
+        Log.state.info("Retry requested for conversation \(self.conversationID, privacy: .public)")
         guard let last = messages.last else { return }
         if last.role == .user {
             await run(parentID: last.id, branch: messages, shrunk: false)
@@ -147,6 +154,7 @@ final class ChatViewModel {
     /// deleted — the transcript is append-only and both remain navigable.
     func regenerate() async {
         guard !phase.isBusy else { return }
+        Log.state.info("Regenerate requested for conversation \(self.conversationID, privacy: .public)")
         guard let index = messages.lastIndex(where: { $0.role == .user }) else { return }
         let branch = Array(messages[...index])
         let anchor = branch[index]
@@ -156,6 +164,7 @@ final class ChatViewModel {
             // answer with an orphaned sibling hanging off it.
             try? await store.setLeaf(anchor.id, in: conversationID)
             messages = branch
+            recomputeVisibleMessages()
             snapshot?.leafID = anchor.id
         }
         await run(parentID: anchor.id, branch: branch, shrunk: false)
@@ -166,6 +175,7 @@ final class ChatViewModel {
     /// Anthropic models reject it.
     func continueGeneration() async {
         guard !phase.isBusy else { return }
+        Log.state.info("Continue generation requested for conversation \(self.conversationID, privacy: .public)")
         guard let last = messages.last, last.role == .assistant else { return }
         guard let user = await commit(
             Message.user("Continue exactly where you left off.", parentID: last.id)
@@ -178,6 +188,7 @@ final class ChatViewModel {
     func edit(_ messageID: UUID, newText: String) async {
         let text = newText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        Log.state.info("Edit message \(messageID, privacy: .public) in conversation \(self.conversationID, privacy: .public)")
         guard let original = message(messageID), original.role == .user else { return }
         // Fork-mid-stream ordering (R2.5): cancel and let the interrupted partial
         // land before the new branch is appended.
@@ -187,8 +198,10 @@ final class ChatViewModel {
 
         if let parentID = original.parentID, let index = messages.firstIndex(where: { $0.id == parentID }) {
             messages = Array(messages[...index])
+            recomputeVisibleMessages()
         } else if original.parentID == nil {
             messages = []
+            recomputeVisibleMessages()
         }
         guard let user = await commit(
             Message(parentID: original.parentID, role: .user, content: [.text(text)])
@@ -248,6 +261,7 @@ final class ChatViewModel {
     private func run(parentID: UUID?, branch: [Message], shrunk: Bool) async {
         lastError = nil
         phase = .sending
+        Log.state.info("Phase → sending for \(self.conversationID, privacy: .public)")
         draft.begin()
         startElapsedTicker()
 
@@ -293,6 +307,9 @@ final class ChatViewModel {
         )
         guard started else {
             // Another generation for this conversation is still running.
+            Log.state.warning(
+                "Generation start refused: session already generating for \(self.conversationID, privacy: .public)"
+            )
             stopElapsedTicker()
             draft.end()
             phase = .idle
@@ -346,8 +363,17 @@ final class ChatViewModel {
     }
 
     private func handleCompletion(_ outcome: GenerationOutcome) {
+        if let error = outcome.error {
+            Log.network.error(
+                "Generation completed with error for \(self.conversationID, privacy: .public): \(error, privacy: .public)"
+            )
+        }
         if let trace = outcome.trace {
             lastTrace = trace
+            let durationStr = trace.duration.map { String(format: "%.2fs", $0) } ?? "?"
+            Log.network.info(
+                "Trace for \(self.conversationID, privacy: .public): model=\(trace.model, privacy: .public), duration=\(durationStr, privacy: .public), bytes=\(trace.bytesReceived)"
+            )
         }
         stopElapsedTicker()
 
@@ -359,6 +385,9 @@ final class ChatViewModel {
            outcome.committed == nil,
            let attempt, !attempt.shrunk
         {
+            Log.network.notice(
+                "Context length rejection; retrying for \(self.conversationID, privacy: .public)"
+            )
             narrowWindow()
             Task { await self.run(parentID: attempt.parentID, branch: attempt.branch, shrunk: true) }
             return
@@ -385,6 +414,7 @@ final class ChatViewModel {
             // connection after 500 streamed tokens is the common case here.
             phase = outcome.committed != nil ? .interrupted : .failed(error)
         }
+        Log.state.info("Phase updated to \(String(describing: self.phase), privacy: .public)")
     }
 
     /// Folds the reported `prompt_tokens` back into the per-model chars/token
@@ -411,6 +441,9 @@ final class ChatViewModel {
         do {
             try await store.append(message, to: conversationID)
         } catch {
+            Log.persist.error(
+                "Failed to commit message \(message.id, privacy: .public): \(error, privacy: .public)"
+            )
             let failure = GatewayError.protocolError("The message could not be saved.")
             lastError = failure
             phase = .failed(failure)
@@ -425,6 +458,19 @@ final class ChatViewModel {
         snapshot?.messagesByID[message.id] = message
         snapshot?.childrenByParent[message.parentID, default: []].append(message.id)
         snapshot?.leafID = message.id
+        recomputeVisibleMessages()
+    }
+
+    private func recomputeVisibleMessages() {
+        visibleMessages = messages.filter { message in
+            if message.role == .tool {
+                return false
+            }
+            if message.role == .assistant, message.text.isEmpty, !(message.toolCalls?.isEmpty ?? true) {
+                return false
+            }
+            return true
+        }
     }
 
     private func message(_ id: UUID) -> Message? {
@@ -441,6 +487,7 @@ final class ChatViewModel {
         guard !trimmed.isEmpty else { return }
         let name = trimmed.count > 40 ? String(trimmed.prefix(40)) + "…" : trimmed
         title = name
+        Log.persist.info("Title updated to \(name, privacy: .public)")
         try? await store.update(title: name, model: nil, for: conversationID)
         await environment.refresh()
     }

@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 /// Process-wide app state: settings, the conversation list, the gateway client,
 /// and the per-conversation sessions and view models.
@@ -15,8 +16,10 @@ final class AppEnvironment {
         static let estimator = "sate.estimator"
     }
 
+    @ObservationIgnored private var settingsWriteTask: Task<Void, Never>?
+
     var settings: SateSettings {
-        didSet { persistSettings() }
+        didSet { debouncePersistSettings() }
     }
 
     private(set) var conversations: [ConversationSummary] = []
@@ -123,12 +126,18 @@ final class AppEnvironment {
     // MARK: - Lifecycle
 
     func bootstrap() async {
+        Log.lifecycle.info("Bootstrap started")
         // A surviving sidecar means the process died mid-stream; the tokens were
         // paid for, so they are committed as interrupted rather than dropped.
         // One entry per recovered message (there is at most one sidecar per
         // conversation, so this is also the number of conversations touched).
-        recoveredCount = ((try? await store.recoverCheckpoints()) ?? []).count
+        let recovered = (try? await store.recoverCheckpoints()) ?? []
+        recoveredCount = recovered.count
+        if recoveredCount > 0 {
+            Log.lifecycle.notice("Recovered \(self.recoveredCount) inflight checkpoint(s)")
+        }
         await refresh()
+        Log.lifecycle.info("Bootstrap complete: \(self.conversations.count) conversations loaded")
     }
 
     func refresh() async {
@@ -139,13 +148,18 @@ final class AppEnvironment {
         guard let header = try? await store.create(
             title: "New Conversation", model: settings.defaultModel
         )
-        else { return nil }
+        else {
+            Log.lifecycle.error("Failed to create new conversation")
+            return nil
+        }
+        Log.lifecycle.info("Created new conversation \(header.conversationID, privacy: .public)")
         await refresh()
         return header.conversationID
     }
 
     func delete(_ ids: Set<UUID>) async {
         guard !ids.isEmpty else { return }
+        Log.lifecycle.info("Deleting \(ids.count) conversation(s)")
         for id in ids {
             if let session = sessions[id] {
                 // Stop the generation before the file goes away, otherwise its commit
@@ -154,7 +168,11 @@ final class AppEnvironment {
             }
             sessions[id] = nil
             viewModels[id] = nil
-            try? await store.delete(id)
+            do {
+                try await store.delete(id)
+            } catch {
+                Log.persist.error("Failed to delete conversation \(id, privacy: .public): \(error, privacy: .public)")
+            }
         }
         await refresh()
     }
@@ -181,6 +199,27 @@ final class AppEnvironment {
         return model
     }
 
+    /// Evicts idle view models and sessions when navigating away from a conversation,
+    /// bounding memory usage while keeping active background generations alive.
+    func evictIdleViewModel(for id: UUID) {
+        if let existing = viewModels[id], existing.phase.isBusy {
+            Log.lifecycle.debug(
+                "Skipping eviction for conversation \(id, privacy: .public): generation in flight"
+            )
+            return
+        }
+        viewModels[id] = nil
+        Log.lifecycle.debug("Evicted idle view model for conversation \(id, privacy: .public)")
+        if let session = sessions[id] {
+            Task { [weak self] in
+                let generating = await session.isGenerating
+                guard !generating else { return }
+                self?.sessions[id] = nil
+                Log.lifecycle.debug("Evicted idle session for conversation \(id, privacy: .public)")
+            }
+        }
+    }
+
     /// Forwards a scene change to EVERY live conversation, not just the one on
     /// screen. A generation started in one conversation keeps running after the
     /// user navigates back to the list — it is owned by the session, not the
@@ -188,6 +227,7 @@ final class AppEnvironment {
     /// stream with no background-task grace and no deliberate commit when iOS
     /// suspends the process.
     func handleScenePhase(_ isActive: Bool) {
+        Log.lifecycle.info("Handling scenePhase isActive=\(isActive) for \(self.viewModels.count) cached view models")
         for model in viewModels.values {
             model.handleScenePhase(isActive)
         }
@@ -239,6 +279,18 @@ final class AppEnvironment {
 
     // MARK: - Internals
 
+    private func debouncePersistSettings() {
+        settingsWriteTask?.cancel()
+        settingsWriteTask = Task {
+            do {
+                try await Task.sleep(nanoseconds: 300_000_000)
+            } catch {
+                return
+            }
+            persistSettings()
+        }
+    }
+
     private func persistSettings() {
         if let data = try? JSONEncoder().encode(settings) {
             defaults.set(data, forKey: Key.settings)
@@ -255,6 +307,7 @@ final class AppEnvironment {
         )
         let signature = AppEnvironment.signature(configuration)
         guard signature != configurationSignature else { return }
+        Log.network.info("Rebuilding GatewayClient: configuration signature changed")
         configurationSignature = signature
         client = GatewayClient(configuration: configuration, session: urlSession)
     }

@@ -26,6 +26,28 @@ struct MarkdownBlock: Identifiable, Hashable {
     /// its trailing paragraph.
     let id: Int
     let kind: Kind
+    var cachedAttributed: AttributedString?
+    var cachedListAttributed: [AttributedString]?
+
+    init(id: Int, kind: Kind, cachedAttributed: AttributedString? = nil, cachedListAttributed: [AttributedString]? = nil) {
+        self.id = id
+        self.kind = kind
+        self.cachedAttributed = cachedAttributed
+        self.cachedListAttributed = cachedListAttributed
+    }
+
+    mutating func precomputeAttributed(sources: [SearchResult]? = nil) {
+        switch kind {
+        case let .paragraph(text), let .heading(_, text):
+            cachedAttributed = MarkdownInline.attributed(text, sources: sources)
+        case let .quote(text):
+            cachedAttributed = MarkdownInline.attributed(text)
+        case let .list(_, _, items):
+            cachedListAttributed = items.map { MarkdownInline.attributed($0) }
+        case .code, .rule:
+            break
+        }
+    }
 }
 
 // MARK: - Fence detection
@@ -327,20 +349,34 @@ enum MarkdownInline {
 /// long answer each time would show up as scroll jank.
 @MainActor
 enum MarkdownCache {
-    private static let limit = 240
-    private static var storage: [String: [MarkdownBlock]] = [:]
-    private static var order: [String] = []
+    private struct CacheKey: Hashable {
+        let source: String
+        let sourcesCount: Int
+    }
 
-    static func blocks(for source: String) -> [MarkdownBlock] {
-        if let cached = storage[source] {
+    private static let limit = 240
+    private static var storage: [CacheKey: [MarkdownBlock]] = [:]
+    private static var order: [CacheKey] = []
+    private static var head = 0
+
+    static func blocks(for source: String, sources: [SearchResult]? = nil) -> [MarkdownBlock] {
+        let key = CacheKey(source: source, sourcesCount: sources?.count ?? 0)
+        if let cached = storage[key] {
             return cached
         }
-        let parsed = MarkdownBlockParser.parse(source)
-        storage[source] = parsed
-        order.append(source)
-        if order.count > limit {
-            let evicted = order.removeFirst()
-            storage.removeValue(forKey: evicted)
+        var parsed = MarkdownBlockParser.parse(source)
+        for i in parsed.indices {
+            parsed[i].precomputeAttributed(sources: sources)
+        }
+        storage[key] = parsed
+        order.append(key)
+        if order.count - head > limit {
+            storage.removeValue(forKey: order[head])
+            head += 1
+            if head > limit {
+                order.removeFirst(head)
+                head = 0
+            }
         }
         return parsed
     }
@@ -350,6 +386,7 @@ enum MarkdownCache {
     static func clear() {
         storage.removeAll(keepingCapacity: false)
         order.removeAll(keepingCapacity: false)
+        head = 0
     }
 }
 
@@ -363,7 +400,7 @@ struct MarkdownBlocksView: View, Equatable {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ForEach(MarkdownCache.blocks(for: source)) { block in
+            ForEach(MarkdownCache.blocks(for: source, sources: sources)) { block in
                 view(for: block)
             }
         }
@@ -374,12 +411,12 @@ struct MarkdownBlocksView: View, Equatable {
     private func view(for block: MarkdownBlock) -> some View {
         switch block.kind {
         case let .paragraph(text):
-            Text(MarkdownInline.attributed(text, sources: sources))
+            Text(block.cachedAttributed ?? MarkdownInline.attributed(text, sources: sources))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
         case let .heading(level, text):
-            Text(MarkdownInline.attributed(text, sources: sources))
+            Text(block.cachedAttributed ?? MarkdownInline.attributed(text, sources: sources))
                 .font(headingFont(level))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -394,7 +431,7 @@ struct MarkdownBlocksView: View, Equatable {
                 RoundedRectangle(cornerRadius: 1.5)
                     .fill(Color.accentColor.opacity(0.5))
                     .frame(width: 3)
-                Text(MarkdownInline.attributed(text))
+                Text(block.cachedAttributed ?? MarkdownInline.attributed(text))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -403,11 +440,17 @@ struct MarkdownBlocksView: View, Equatable {
         case let .list(ordered, start, items):
             VStack(alignment: .leading, spacing: 5) {
                 ForEach(Array(items.enumerated()), id: \.offset) { offset, item in
+                    let attributedItem = {
+                        if let list = block.cachedListAttributed, offset < list.count {
+                            return list[offset]
+                        }
+                        return MarkdownInline.attributed(item)
+                    }()
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(ordered ? "\(start + offset)." : "•")
                             .monospacedDigit()
                             .foregroundStyle(.secondary)
-                        Text(MarkdownInline.attributed(item))
+                        Text(attributedItem)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }

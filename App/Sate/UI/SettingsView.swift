@@ -1,3 +1,4 @@
+import OSLog
 import SwiftUI
 
 /// Everything the user can configure.
@@ -74,7 +75,9 @@ struct SettingsView: View {
                         tokenEntry = ""
                         hasStoredToken = env.token() != nil
                         tokenError = nil
+                        Log.keychain.info("Token successfully saved from SettingsView")
                     } catch {
+                        Log.keychain.error("Failed to save token to Keychain: \(error, privacy: .public)")
                         tokenError = "Failed to save token to Keychain: \(error.localizedDescription)"
                     }
                 }
@@ -87,7 +90,9 @@ struct SettingsView: View {
                             tokenEntry = ""
                             hasStoredToken = false
                             tokenError = nil
+                            Log.keychain.info("Token successfully removed from SettingsView")
                         } catch {
+                            Log.keychain.error("Failed to remove token from Keychain: \(error, privacy: .public)")
                             tokenError = "Failed to remove token from Keychain: \(error.localizedDescription)"
                         }
                     }
@@ -149,7 +154,9 @@ struct SettingsView: View {
                         searchTokenEntry = ""
                         hasStoredSearchToken = env.searchToken() != nil
                         searchTokenError = nil
+                        Log.keychain.info("Search token successfully saved from SettingsView")
                     } catch {
+                        Log.keychain.error("Failed to save search key to Keychain: \(error, privacy: .public)")
                         searchTokenError = "Failed to save search key to Keychain: \(error.localizedDescription)"
                     }
                 }
@@ -162,7 +169,9 @@ struct SettingsView: View {
                             searchTokenEntry = ""
                             hasStoredSearchToken = false
                             searchTokenError = nil
+                            Log.keychain.info("Search token successfully removed from SettingsView")
                         } catch {
+                            Log.keychain.error("Failed to remove search key from Keychain: \(error, privacy: .public)")
                             searchTokenError = "Failed to remove search key from Keychain: \(error.localizedDescription)"
                         }
                     }

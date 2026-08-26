@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 #if canImport(UIKit)
     import UIKit
 #endif
@@ -25,6 +26,19 @@ final class BackgroundTaskGuard {
 
     init() {}
 
+    deinit {
+        timeout?.cancel()
+        #if canImport(UIKit)
+            let taskID = identifier
+            if taskID != .invalid {
+                Log.lifecycle.warning("BackgroundTaskGuard deallocated while background task assertion was still active")
+                Task { @MainActor in
+                    UIApplication.shared.endBackgroundTask(taskID)
+                }
+            }
+        #endif
+    }
+
     var isActive: Bool {
         timeout != nil
     }
@@ -32,15 +46,18 @@ final class BackgroundTaskGuard {
     func begin(name: String = "sate.generation", onExpire: @escaping @MainActor () -> Void) {
         guard timeout == nil else { return }
         expirationHandler = onExpire
+        Log.lifecycle.info("BackgroundTaskGuard beginning background task assertion: \(name, privacy: .public)")
 
         #if canImport(UIKit)
             identifier = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
                 // Documented to run on the main thread, and it must act immediately:
                 // hopping through a Task risks suspension before it ever runs.
+                Log.lifecycle.notice("System expired background task assertion \(name, privacy: .public)")
                 MainActor.assumeIsolated { self?.expire() }
             }
             guard identifier != .invalid else {
                 // Background execution was refused outright; do not pretend to have time.
+                Log.lifecycle.error("System refused background task assertion for \(name, privacy: .public)")
                 expire()
                 return
             }
@@ -53,6 +70,7 @@ final class BackgroundTaskGuard {
                 return
             }
             guard !Task.isCancelled else { return }
+            Log.lifecycle.notice("Self-imposed background budget (\(Self.budget, format: .fixed(precision: 0))s) expired for \(name, privacy: .public)")
             self?.expire()
         }
     }
@@ -65,7 +83,9 @@ final class BackgroundTaskGuard {
         expirationHandler = nil
         #if canImport(UIKit)
             guard identifier != .invalid else { return }
-            UIApplication.shared.endBackgroundTask(identifier)
+            let taskID = identifier
+            Log.lifecycle.info("Ending background task assertion \(taskID.rawValue)")
+            UIApplication.shared.endBackgroundTask(taskID)
             identifier = .invalid
         #endif
     }
