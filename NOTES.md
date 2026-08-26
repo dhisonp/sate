@@ -135,6 +135,24 @@ substantive finds, all now fixed with regression tests:
 5. **A duplicate message** when the leaf write failed after the message landed.
 6. **Silent double data loss** when a short write fused onto the next append.
 
+A third reviewer read the app layer and found two more, both since fixed:
+
+7. **A cheap Continue was being turned into a re-billed Regenerate.** Any
+   non-cancel error set `phase = .failed` even when a partial answer had already
+   been committed, so the UI showed only *Retry* — and Retry on an assistant turn
+   regenerates the whole answer and pays for it again. Dropping Wi-Fi after 500
+   streamed tokens is the common case. Now a committed partial always yields
+   `.interrupted`, which offers *Continue*.
+8. **Background grace only covered the on-screen conversation.** A generation
+   left running while you navigate back to the list got no background-task
+   assertion and no deliberate interrupted-commit when iOS suspended the app.
+   Scene changes now reach every live conversation.
+
+The reviewer independently confirmed the R3 streaming-performance contract holds
+(no `Draft` reads in `ChatView.body`, no `List`, frozen paragraphs intact, no
+expensive effects on the mutating text, no animation on token flush), and found
+no token-leak path.
+
 ## Liquid Glass pass
 
 Applied per Apple's iOS 26 guidance (`docs/reference/liquid-glass-ios26.md`),
@@ -258,7 +276,16 @@ search, or a Cloudflare Worker that does the search and injects results. Note
 that the second one breaks the "no backend of our own" premise, which is a real
 architectural decision rather than a small feature.
 
-### 8. Smaller items
+### 8. The app layer has no tests
+All 160 tests cover `SateCore`. `App/Sate/**` has none — which is exactly why
+the two defects above needed a human-style read to find. The app layer was built
+to be testable (`LLMStreaming` is injectable, `ConversationStore` takes a
+directory, the coalescer takes a `Clock`), so a small suite around
+`ChatViewModel`'s error matrix and `ConversationSession`'s commit paths would be
+cheap and would guard the parts where mistakes cost money. This needs either an
+XCUITest/unit target in the Xcode project or moving that logic into SateCore.
+
+### 9. Smaller items
 - `JSONLFile.shortWriteInjector` is an `internal` test seam added to prove two
   crash-safety fixes (ENOSPC is process-global and unusable in a parallel test
   suite). It is invisible to the app and costs one nil check per line written —

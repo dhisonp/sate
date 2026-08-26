@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Navigation is a typed path so the scene can tell which conversation is on
-/// screen — that is what `scenePhase` changes have to be forwarded to.
+/// Navigation is a typed path so routes stay value types and the demo hook can
+/// push a screen directly.
 enum SateRoute: Hashable {
     case chat(UUID)
     case settings
@@ -44,11 +44,11 @@ private struct RootView: View {
             await runDemoIfRequested()
         }
         .onChange(of: scenePhase) { _, phase in
-            // Only the conversation actually on screen needs to know: it owns the
-            // background-task guard that decides whether to keep streaming for the
-            // ~25 s the system allows, or commit the partial as interrupted.
-            guard let id = activeConversationID else { return }
-            env.viewModel(for: id).handleScenePhase(phase == .active)
+            // Every conversation with a live generation needs this, not just the
+            // visible one: a stream survives navigating back to the list, and
+            // whichever conversation owns it still needs the background-task
+            // grace and the deliberate interrupted-commit when iOS suspends us.
+            env.handleScenePhase(phase == .active)
         }
     }
 
@@ -69,12 +69,5 @@ private struct RootView: View {
         vm.input = environmentValues["SATE_DEMO_PROMPT"]
             ?? "Explain what a Server-Sent Event is, and why it suits token streaming."
         await vm.send()
-    }
-
-    private var activeConversationID: UUID? {
-        for route in path.reversed() {
-            if case .chat(let id) = route { return id }
-        }
-        return nil
     }
 }

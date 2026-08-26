@@ -337,7 +337,12 @@ final class ChatViewModel {
             phase = .interrupted
         case .some(let error):
             lastError = error
-            phase = .failed(error)
+            // A partial that reached disk is worth more than the error that ended
+            // it: `.interrupted` offers Continue, which resumes from the partial,
+            // while `.failed` offers only Retry — and Retry on an assistant turn
+            // regenerates the whole answer and bills for it again. Dropping a
+            // connection after 500 streamed tokens is the common case here.
+            phase = outcome.committed != nil ? .interrupted : .failed(error)
         }
     }
 

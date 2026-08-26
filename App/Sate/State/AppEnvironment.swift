@@ -151,6 +151,18 @@ final class AppEnvironment {
         return model
     }
 
+    /// Forwards a scene change to EVERY live conversation, not just the one on
+    /// screen. A generation started in one conversation keeps running after the
+    /// user navigates back to the list — it is owned by the session, not the
+    /// view — so scoping this to the visible conversation would leave that
+    /// stream with no background-task grace and no deliberate commit when iOS
+    /// suspends the process.
+    func handleScenePhase(_ isActive: Bool) {
+        for model in viewModels.values {
+            model.handleScenePhase(isActive)
+        }
+    }
+
     // MARK: - Token
 
     func setToken(_ token: String?) {
