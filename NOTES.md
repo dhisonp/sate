@@ -267,6 +267,21 @@ The R3 architecture is built for it but **no Instruments run has been done**.
 Profile a 10k-token stream with the Hangs and Time Profiler templates on the
 oldest device you care about; the target is zero main-thread hangs over 50ms.
 
+**Startup / new-chat fixes applied.** Sampling a simulator launch showed two
+real main-thread costs: `SecItemCopyMatching` during `AppEnvironment` init
+(~4 ms in the sample, but synchronous and on the main thread), and
+`F_FULLFSYNC` inside `ConversationStore.create` for the empty header line. Both
+are now gone from the main path:
+- `AppEnvironment` no longer reads the Keychain in `init`; tokens are loaded
+  with `Task.detached` during `bootstrap()`.
+- `bootstrap()` only calls `recoverCheckpoints()` when `hasCheckpoints()`
+  reports sidecars, keeping the heavy recovery path on the post-crash edge case.
+- `ConversationStore.create` writes the header line without `F_FULLFSYNC`.
+  The first message append still issues the durable barrier, so user text is
+  protected; an empty header-only file contains nothing to lose.
+- `AppEnvironment.newConversation()` inserts the new summary directly into the
+  sorted list instead of reloading the whole index.
+
 ### 6. Real-device checks the simulator cannot give you
 VoiceOver (announcements fire, streaming text is not re-read per flush),
 Dynamic Type at XXXL, Reduce Motion, backgrounding mid-stream, Airplane Mode

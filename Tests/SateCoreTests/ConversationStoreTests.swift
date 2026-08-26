@@ -509,3 +509,34 @@ struct ConversationStoreTests {
         #expect(lines.count == 41) // header + 20 * (message + leaf)
     }
 }
+
+@Suite("ConversationStore checkpoints")
+struct ConversationStoreCheckpointTests {
+    private func makeDirectory() -> URL {
+        FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    }
+
+    private func cleanUp(_ url: URL) {
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    @Test("hasCheckpoints is false with no sidecars and true when one exists")
+    func hasCheckpointsReflectsSidecars() async throws {
+        let dir = makeDirectory()
+        defer { cleanUp(dir) }
+        let store = ConversationStore(directory: dir)
+
+        #expect(try await store.hasCheckpoints() == false)
+
+        let id = try await store.create(title: "T", model: "m").conversationID
+        try await store.checkpoint(
+            conversationID: id, parentID: nil, text: "x", reasoning: "", model: "m"
+        )
+
+        #expect(try await store.hasCheckpoints() == true)
+
+        try await store.clearCheckpoint(id)
+
+        #expect(try await store.hasCheckpoints() == false)
+    }
+}

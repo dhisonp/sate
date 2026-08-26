@@ -64,7 +64,9 @@ final class AppEnvironment {
         store: ConversationStore,
         secrets: any SecretStore,
         defaults: UserDefaults,
-        isMock: Bool
+        isMock: Bool,
+        cachedToken: String? = nil,
+        cachedSearchToken: String? = nil
     ) {
         self.settings = settings
         self.estimator = estimator
@@ -72,17 +74,15 @@ final class AppEnvironment {
         self.secrets = secrets
         self.defaults = defaults
         self.isMock = isMock
-        let token = try? secrets.token()
-        let searchToken = try? secrets.searchToken()
-        cachedToken = token
-        cachedSearchToken = searchToken
+        self.cachedToken = cachedToken
+        self.cachedSearchToken = cachedSearchToken
         urlSession = isMock ? nil : AppEnvironment.makeURLSession()
         if isMock {
             client = MockGatewayClient()
             configurationSignature = "mock"
         } else {
             let configuration = AppEnvironment.configuration(
-                settings: settings, token: token ?? ""
+                settings: settings, token: cachedToken ?? ""
             )
             client = GatewayClient(configuration: configuration, session: urlSession)
             configurationSignature = AppEnvironment.signature(configuration)
@@ -123,21 +123,33 @@ final class AppEnvironment {
         )
     }
 
-    // MARK: - Lifecycle
-
     func bootstrap() async {
         Log.lifecycle.info("Bootstrap started")
-        // A surviving sidecar means the process died mid-stream; the tokens were
-        // paid for, so they are committed as interrupted rather than dropped.
-        // One entry per recovered message (there is at most one sidecar per
-        // conversation, so this is also the number of conversations touched).
-        let recovered = (try? await store.recoverCheckpoints()) ?? []
-        recoveredCount = recovered.count
+
+        if !isMock {
+            let tokens = await Task.detached { [secrets] in
+                (try? secrets.token(), try? secrets.searchToken())
+            }.value
+            guard !Task.isCancelled else { return }
+            cachedToken = tokens.0
+            cachedSearchToken = tokens.1
+            rebuildClientIfNeeded()
+        }
+
+        let recovered: [UUID]
+        if let hasCheckpoints = try? await store.hasCheckpoints(), hasCheckpoints {
+            recovered = (try? await store.recoverCheckpoints()) ?? []
+        } else {
+            recovered = []
+        }
+        let recoveredCount = recovered.count
+        self.recoveredCount = recoveredCount
         if recoveredCount > 0 {
-            Log.lifecycle.notice("Recovered \(self.recoveredCount) inflight checkpoint(s)")
+            Log.lifecycle.notice("Recovered \(recoveredCount) inflight checkpoint(s)")
         }
         await refresh()
-        Log.lifecycle.info("Bootstrap complete: \(self.conversations.count) conversations loaded")
+        let conversationCount = conversations.count
+        Log.lifecycle.info("Bootstrap complete: \(conversationCount) conversations loaded")
     }
 
     func refresh() async {
@@ -153,7 +165,21 @@ final class AppEnvironment {
             return nil
         }
         Log.lifecycle.info("Created new conversation \(header.conversationID, privacy: .public)")
-        await refresh()
+
+        let summary = ConversationSummary(
+            id: header.conversationID,
+            title: header.title,
+            model: header.model,
+            updatedAt: header.createdAt,
+            messageCount: 0
+        )
+        let index = conversations.firstIndex { existing in
+            if existing.updatedAt != summary.updatedAt {
+                return existing.updatedAt < summary.updatedAt
+            }
+            return existing.id.uuidString < summary.id.uuidString
+        } ?? conversations.endIndex
+        conversations.insert(summary, at: index)
         return header.conversationID
     }
 
@@ -227,13 +253,12 @@ final class AppEnvironment {
     /// stream with no background-task grace and no deliberate commit when iOS
     /// suspends the process.
     func handleScenePhase(_ isActive: Bool) {
-        Log.lifecycle.info("Handling scenePhase isActive=\(isActive) for \(self.viewModels.count) cached view models")
+        let viewModelCount = viewModels.count
+        Log.lifecycle.info("Handling scenePhase isActive=\(isActive) for \(viewModelCount) cached view models")
         for model in viewModels.values {
             model.handleScenePhase(isActive)
         }
     }
-
-    // MARK: - Token
 
     func setToken(_ token: String?) throws {
         let trimmed = token?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -268,16 +293,12 @@ final class AppEnvironment {
         return TavilySearchProvider(apiKey: token)
     }
 
-    // MARK: - Estimator
-
     func calibrate(model: String, characters: Int, promptTokens: Int) {
         estimator.calibrate(model: model, characters: characters, promptTokens: promptTokens)
         if let data = try? JSONEncoder().encode(estimator) {
             defaults.set(data, forKey: Key.estimator)
         }
     }
-
-    // MARK: - Internals
 
     private func debouncePersistSettings() {
         settingsWriteTask?.cancel()

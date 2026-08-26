@@ -146,7 +146,10 @@ public actor ConversationStore {
     public func create(title: String, model: String) throws -> ConversationHeader {
         let header = ConversationHeader(title: title, model: model)
         let target = file(header.conversationID)
-        try append(.header(header), to: target, id: header.conversationID, durable: true)
+        // The header line carries no user text; durability is provided by the
+        // first message append. Skipping F_FULLFSYNC here removes the largest
+        // source of latency when opening a new conversation.
+        try append(.header(header), to: target, id: header.conversationID, durable: false)
         // A brand-new file has no history, so nothing can need repair.
         repaired.insert(header.conversationID)
 
@@ -363,6 +366,17 @@ public actor ConversationStore {
         let sidecar = inflightURL(id)
         guard FileManager.default.fileExists(atPath: sidecar.path) else { return }
         try FileManager.default.removeItem(at: sidecar)
+    }
+
+    /// Cheap check so bootstrap can skip the heavy recovery path on a normal launch.
+    public func hasCheckpoints() throws -> Bool {
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: directory.path) else { return false }
+
+        let contents = try manager.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        )
+        return contents.contains { $0.pathExtension == "inflight" }
     }
 
     /// Turns every surviving sidecar into an interrupted assistant message.
