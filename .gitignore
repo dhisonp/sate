@@ -6,3 +6,5 @@ App/Sate.xcodeproj/project.xcworkspace/xcuserdata/
 App/Sate.xcodeproj/xcuserdata/
 *.xcuserstate
 build/
+
+local/
