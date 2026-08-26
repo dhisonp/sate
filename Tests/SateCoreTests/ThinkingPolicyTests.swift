@@ -4,20 +4,36 @@ import Testing
 
 @Suite("ThinkingPolicy")
 struct ThinkingPolicyTests {
-    @Test("Off level emits empty extra for every provider family")
-    func offEmitsEmptyExtra() {
-        let models = [
+    @Test("Off level emits provider-appropriate disable payloads for reasoning models")
+    func offEmitsDisablePayloads() {
+        let workersReasoning = ["@cf/google/gemma-4-26b-a4b-it", "@cf/qwen/qwen3.8-27b", "qwen/qwen-2.5-max"]
+        for model in workersReasoning {
+            let extra = ThinkingPolicy.extra(for: model, level: .off)
+            #expect(
+                extra == ["enable_thinking": .bool(false)],
+                "Model \(model) must emit enable_thinking: false when .off"
+            )
+        }
+
+        let anthropicModels = ["anthropic/claude-3-7-sonnet", "claude-3-7-sonnet"]
+        for model in anthropicModels {
+            let extra = ThinkingPolicy.extra(for: model, level: .off)
+            #expect(extra == ["thinking": .object(["type": .string("disabled")])])
+        }
+
+        let deepSeekModels = ["deepseek/deepseek-r1", "deepseek-r1"]
+        for model in deepSeekModels {
+            let extra = ThinkingPolicy.extra(for: model, level: .off)
+            #expect(extra == ["thinking": .object(["enabled": .bool(false)])])
+        }
+
+        let emptyModels = [
             "openai/gpt-5.2",
             "openai/o3-mini",
-            "anthropic/claude-3-7-sonnet",
-            "deepseek/deepseek-r1",
-            "qwen/qwen-2.5-max",
-            "@cf/google/gemma-4-26b-a4b-it",
-            "@cf/qwen/qwen3.8-27b",
             "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
             "unknown/model",
         ]
-        for model in models {
+        for model in emptyModels {
             let extra = ThinkingPolicy.extra(for: model, level: .off)
             #expect(extra.isEmpty, "Model \(model) must produce empty extra when level is .off")
         }

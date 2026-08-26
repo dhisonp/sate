@@ -10,7 +10,7 @@ struct SearchProviderTests {
             title: "Swift",
             url: "https://swift.org",
             snippet: "A powerful open language",
-            publishedAt: Date(timeIntervalSince1970: 1700000000),
+            publishedAt: Date(timeIntervalSince1970: 1_700_000_000),
             siteName: "swift.org"
         )
         #expect(result.id == "https://swift.org")

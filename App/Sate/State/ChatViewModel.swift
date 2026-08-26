@@ -36,6 +36,7 @@ final class ChatViewModel {
     private(set) var phase: ChatPhase = .idle
     var input: String = ""
     var isSearchEnabled: Bool
+    var thinkingLevel: ThinkingLevel
     private(set) var title: String
     var model: String {
         didSet {
@@ -84,6 +85,7 @@ final class ChatViewModel {
         title = "New Conversation"
         model = environment.settings.defaultModel
         isSearchEnabled = environment.settings.searchEnabledByDefault
+        thinkingLevel = environment.settings.thinkingLevel
     }
 
     /// True when the newest assistant message can be continued.
@@ -263,7 +265,7 @@ final class ChatViewModel {
             )
             : builder.build(branch: branch, systemPrompt: systemPrompt, window: window)
 
-        let thinkingExtra = ThinkingPolicy.extra(for: model, level: settings.thinkingLevel)
+        let thinkingExtra = ThinkingPolicy.extra(for: model, level: thinkingLevel)
         // The builder already put the system prompt at the head of `messages`, so
         // passing it again here would send it twice.
         let request = ChatCompletionRequest(

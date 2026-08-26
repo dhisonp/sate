@@ -18,6 +18,7 @@ import SwiftUI
 /// markdown appears the instant the message commits into `MessageBubble`.
 struct StreamingMessageView: View {
     let draft: Draft
+    var isThinking: Bool = false
 
     var body: some View {
         let paragraphs = MarkdownParagraphs.split(draft.text)
@@ -30,7 +31,7 @@ struct StreamingMessageView: View {
                     .equatable()
 
                 if draft.text.isEmpty {
-                    ThinkingIndicator(draft: draft)
+                    ThinkingIndicator(draft: draft, isThinking: isThinking)
                         .padding(.vertical, 2)
                 } else {
                     ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
@@ -111,14 +112,16 @@ private struct StreamingReasoningView: View, Equatable {
 /// invalidate `ChatView`.
 struct ThinkingIndicator: View {
     let draft: Draft
+    var isThinking: Bool = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let seconds = draft.elapsedSeconds
+        let activeThinking = isThinking || !draft.reasoning.isEmpty
         HStack(spacing: 8) {
             ProgressView()
                 .controlSize(.small)
-            Text(label(for: seconds))
+            Text(label(for: seconds, isThinking: activeThinking))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
@@ -126,14 +129,18 @@ struct ThinkingIndicator: View {
         // No `maxWidth: .infinity`: the caller wraps this in a glass pill that
         // must hug its content rather than stretch across the screen.
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(label(for: seconds))
+        .accessibilityLabel(label(for: seconds, isThinking: activeThinking))
         // No implicit animation on a per-second text change under Reduce Motion.
         .animation(reduceMotion ? nil : .default, value: seconds >= 60)
     }
 
-    private func label(for seconds: Int) -> String {
+    private func label(for seconds: Int, isThinking: Bool) -> String {
         // Past ~60 s the risk is a carrier or middlebox dropping an idle flow, so
         // the copy changes to set the expectation that this may not land.
-        seconds >= 60 ? "Still thinking… (\(seconds)s)" : "Thinking… (\(seconds)s)"
+        if isThinking {
+            return seconds >= 60 ? "Still thinking… (\(seconds)s)" : "Thinking… (\(seconds)s)"
+        } else {
+            return seconds >= 60 ? "Still waiting… (\(seconds)s)" : "Waiting… (\(seconds)s)"
+        }
     }
 }

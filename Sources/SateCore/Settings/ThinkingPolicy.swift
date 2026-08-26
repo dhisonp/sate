@@ -16,8 +16,6 @@ public enum ThinkingPolicy {
 
     /// Resolves extra JSON body parameters for the given model and thinking level.
     public static func extra(for model: String, level: ThinkingLevel) -> [String: JSONValue] {
-        guard level != .off else { return [:] }
-
         let canonical = model.hasPrefix(ModelCatalog.compatProviderPrefix)
             ? String(model.dropFirst(ModelCatalog.compatProviderPrefix.count))
             : model
@@ -26,7 +24,25 @@ public enum ThinkingPolicy {
             return [:]
         }
 
-        return formatExtra(for: providerFamily(for: canonical), level: level)
+        let family = providerFamily(for: canonical)
+        if level == .off {
+            return formatOffExtra(for: family)
+        }
+        return formatExtra(for: family, level: level)
+    }
+
+    /// Formats the extra dictionary when thinking is turned off.
+    private static func formatOffExtra(for family: ProviderFamily) -> [String: JSONValue] {
+        switch family {
+        case .qwen, .workersAI:
+            return ["enable_thinking": .bool(false)]
+        case .anthropic:
+            return ["thinking": .object(["type": .string("disabled")])]
+        case .deepSeek:
+            return ["thinking": .object(["enabled": .bool(false)])]
+        case .openAI, .unknown:
+            return [:]
+        }
     }
 
     /// Formats the extra dictionary for a recognized provider family.

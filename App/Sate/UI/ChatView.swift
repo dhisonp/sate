@@ -95,7 +95,7 @@ struct ChatView: View {
 
                     // Always present, so committing the draft into the transcript
                     // is not a view-type change and does not move the scroll.
-                    StreamingMessageView(draft: vm.draft)
+                    StreamingMessageView(draft: vm.draft, isThinking: vm.thinkingLevel != .off)
 
                     completionFooter
 
@@ -245,7 +245,7 @@ struct ChatView: View {
             }
 
         case .awaitingFirstToken:
-            statusRow { ThinkingIndicator(draft: vm.draft).statusPillGlass() }
+            statusRow { ThinkingIndicator(draft: vm.draft, isThinking: vm.thinkingLevel != .off).statusPillGlass() }
 
         case let .failed(error):
             statusRow {
@@ -454,6 +454,18 @@ private struct ModelSheet: View {
                             vm.model = env.settings.defaultModel
                         }
                     }
+                }
+
+                Section {
+                    Picker("Thinking", selection: $vm.thinkingLevel) {
+                        ForEach(ThinkingLevel.allCases, id: \.self) { level in
+                            Text(level.displayName).tag(level)
+                        }
+                    }
+                } header: {
+                    Text("Reasoning")
+                } footer: {
+                    Text("Thinking level controls reasoning effort before answering.")
                 }
             }
             .navigationTitle("Model")

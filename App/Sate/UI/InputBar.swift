@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// Composer + Search Toggle + Send/Stop (R4.1).
+/// Composer + Expandable Config Bubble + Send/Stop (R4.1).
 ///
 /// Send/Stop state deliberately lives here rather than in `ChatView`: this view's
 /// body is the only place that reads `vm.phase` for the button, so a phase change
-/// re-evaluates a three-control `HStack` instead of the whole transcript.
+/// re-evaluates this control instead of the whole transcript.
 ///
 /// The field is always interactive — the user can keep typing the next prompt
 /// while a response streams, and the text survives a failed send because the
@@ -12,6 +12,8 @@ import SwiftUI
 struct InputBar: View {
     @Bindable var vm: ChatViewModel
     @FocusState private var isFocused: Bool
+    @State private var isConfigExpanded: Bool = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isBusy: Bool {
         vm.phase.isBusy
@@ -21,41 +23,119 @@ struct InputBar: View {
         !vm.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// The field and the action buttons are adjacent glass elements sharing
-    /// `ChatView`'s `GlassEffectContainer` for consistent sampling.
+    private var hasActiveConfig: Bool {
+        vm.isSearchEnabled || vm.thinkingLevel != .off
+    }
+
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
             TextField("Message", text: $vm.input, axis: .vertical)
                 .lineLimit(1 ... 6)
                 .textFieldStyle(.plain)
                 .focused($isFocused)
                 .submitLabel(.return)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 13)
-                .glassEffect(.regular, in: .capsule)
+                .padding(.horizontal, 4)
+                .padding(.top, 4)
                 .accessibilityLabel("Message")
 
-            searchButton
+            HStack(alignment: .center, spacing: 8) {
+                configBubble
 
-            actionButton
+                Spacer(minLength: 0)
+
+                actionButton
+            }
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .glassEffect(.regular, in: .rect(cornerRadius: 24))
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
+    }
+
+    private var configBubble: some View {
+        HStack(spacing: 8) {
+            Button {
+                withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8)) {
+                    isConfigExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: isConfigExpanded ? "chevron.left" : "slider.horizontal.3")
+                        .font(.system(size: 15, weight: .semibold))
+                    if !isConfigExpanded && hasActiveConfig {
+                        activeConfigBadges
+                    }
+                }
+                .foregroundStyle(hasActiveConfig ? Color.accentColor : Color.secondary)
+                .frame(minHeight: 36)
+                .padding(.horizontal, 10)
+                .background(Color.secondary.opacity(0.12), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isConfigExpanded ? "Collapse configuration" : "Expand configuration")
+
+            if isConfigExpanded {
+                thinkingButton
+                    .transition(.scale.combined(with: .opacity))
+                searchButton
+                    .transition(.scale.combined(with: .opacity))
+            }
+        }
+    }
+
+    private var activeConfigBadges: some View {
+        HStack(spacing: 4) {
+            if vm.thinkingLevel != .off {
+                Image(systemName: "brain.fill")
+                    .font(.system(size: 12, weight: .bold))
+            }
+            if vm.isSearchEnabled {
+                Image(systemName: "globe")
+                    .font(.system(size: 12, weight: .bold))
+            }
+        }
+    }
+
+    private var thinkingButton: some View {
+        Menu {
+            Picker("Thinking", selection: $vm.thinkingLevel) {
+                ForEach(ThinkingLevel.allCases, id: \.self) { level in
+                    Text(level.displayName).tag(level)
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: vm.thinkingLevel == .off ? "brain" : "brain.fill")
+                    .font(.system(size: 14, weight: vm.thinkingLevel == .off ? .medium : .bold))
+                Text(vm.thinkingLevel.displayName)
+                    .font(.footnote.weight(.medium))
+            }
+            .foregroundStyle(vm.thinkingLevel == .off ? Color.secondary : Color.accentColor)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.secondary.opacity(0.12), in: Capsule())
+        }
+        .accessibilityLabel("Thinking: \(vm.thinkingLevel.displayName)")
+        .accessibilityHint("Select thinking effort for this conversation")
     }
 
     private var searchButton: some View {
         Button {
             vm.isSearchEnabled.toggle()
         } label: {
-            Image(systemName: "globe")
-                .font(.system(size: 16, weight: vm.isSearchEnabled ? .bold : .medium))
-                .foregroundStyle(vm.isSearchEnabled ? Color.accentColor : Color.secondary)
+            HStack(spacing: 4) {
+                Image(systemName: "globe")
+                    .font(.system(size: 14, weight: vm.isSearchEnabled ? .bold : .medium))
+                Text("Search")
+                    .font(.footnote.weight(.medium))
+            }
+            .foregroundStyle(vm.isSearchEnabled ? Color.accentColor : Color.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.secondary.opacity(0.12), in: Capsule())
         }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
-        .controlSize(.large)
-        .clipShape(Circle())
-        .frame(minWidth: 44, minHeight: 44)
+        .buttonStyle(.plain)
         .accessibilityLabel(vm.isSearchEnabled ? "Web search enabled" : "Web search disabled")
         .accessibilityHint("Double-tap to toggle web search for this conversation")
     }

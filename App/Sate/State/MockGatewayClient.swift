@@ -89,6 +89,12 @@ actor MockGatewayClient: LLMStreaming {
             return
         }
 
+        let isThinkingRequested = (request.extra["enable_thinking"] == .bool(true))
+            || (request.extra["thinking"] != nil
+                && request.extra["thinking"] != .object(["type": .string("disabled")])
+                && request.extra["thinking"] != .object(["enabled": .bool(false)]))
+            || (request.extra["reasoning_effort"] != nil)
+
         let script: String
         if isAnsweringTool {
             script = Self.searchAnswerScript
@@ -98,8 +104,10 @@ actor MockGatewayClient: LLMStreaming {
             script = Self.truncatedScript
         } else if hasTools, prompt.contains("search") || prompt.contains("latest") || prompt.contains("who") || prompt.contains("what") {
             script = Self.searchToolCallScript
-        } else {
+        } else if isThinkingRequested {
             script = Self.normalScript
+        } else {
+            script = Self.stripReasoning(from: Self.normalScript)
         }
 
         var parser = SSEParser()
@@ -208,6 +216,12 @@ actor MockGatewayClient: LLMStreaming {
     data: [DONE]
 
     """#
+
+    private static func stripReasoning(from script: String) -> String {
+        script.components(separatedBy: "\n\n")
+            .filter { !$0.contains("\"reasoning_content\"") && !$0.contains("\"reasoning\"") }
+            .joined(separator: "\n\n")
+    }
 
     private static let normalScript = #"""
     data: {"id":"chatcmpl-mock-0001","object":"chat.completion.chunk","created":1756180000,"model":"mock/sate-preview","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}

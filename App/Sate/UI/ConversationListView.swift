@@ -15,7 +15,7 @@ struct ConversationListView: View {
     @State private var isShowingDeleteAllDialog = false
 
     private var navigationTitle: String {
-        guard editMode.isEditing else { return "Sate" }
+        guard editMode.isEditing else { return "" }
         return selectedIDs.isEmpty ? "Select Conversations" : "\(selectedIDs.count) Selected"
     }
 
