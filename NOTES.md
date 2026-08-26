@@ -115,6 +115,9 @@ token storage, background-task guard, and an offline mock.
 
 ## Bugs found by review and fixed
 
+Full write-ups — failure scenario, root cause, fix, regression test — are in
+[`docs/bugs.md`](docs/bugs.md). Summary:
+
 Two adversarial reviewers read the core; a third read the app layer. The
 substantive finds, all now fixed with regression tests:
 
@@ -301,3 +304,48 @@ XCUITest/unit target in the Xcode project or moving that logic into SateCore.
 - v2 hooks deliberately left in place: tool-execution loop (`StreamEvent`
   already carries `toolCallDelta`), images (`ContentPart` is an array),
   compaction (`ContextBuilder` is a seam), iCloud sync.
+
+## Model selection (added after the overnight run)
+
+The free-form model text fields are now a picker over `ModelCatalog`
+(`Sources/SateCore/Settings/ModelCatalog.swift`), which lists Cloudflare's own
+`@cf` Workers AI models. Those run on Cloudflare's infrastructure, so they need
+no BYOK provider key and no Unified Billing fall-through — they are the only
+models that work on a fresh install with nothing but an account id and a token.
+
+| Model | id | Context |
+|---|---|---|
+| Gemma 4 26B (Google) | `@cf/google/gemma-4-26b-a4b-it` | 256,000 |
+| Qwen 3.8 27B (Alibaba) | `@cf/qwen/qwen3.8-27b` | 262,144 |
+| Qwen3 30B A3B (Alibaba) | `@cf/qwen/qwen3-30b-a3b-fp8` | 32,768 |
+| Llama 3.3 70B Fast (Meta) | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | 24,000 |
+
+Defaults moved to Gemma 4 for chat and Llama 3.3 70B Fast for titling. The
+picker keeps a **Custom** row, so every other `provider/model` string the gateway
+resolves is still reachable; a stored value outside the catalog opens the field
+already in custom mode. A catalog model also supplies its real context window as
+the default input budget, so `ContextBuilder` stops assuming 100k for everything.
+
+Two Cloudflare details this surfaced, both now handled:
+
+- **The two hosts spell Workers AI models differently.** REST takes the bare
+  `@cf/author/model`; the compat host wants `workers-ai/@cf/author/model`. The
+  catalog stores the REST form and `GatewayRoute.wireModel(_:)` rewrites it once
+  the route is known.
+- **Workers AI on REST requires `cf-aig-gateway-id`.** Other providers only need
+  it to select a non-default gateway. The client now falls back to `default` for
+  `@cf` models when no gateway id is configured, so a fresh install works.
+
+The catalog is static on purpose: there is no unauthenticated endpoint that
+enumerates gateway-reachable models, and a settings screen that can fail to
+populate is worse than a short list plus free-form entry.
+
+## Web search
+
+Not implemented. The spec is
+[`docs/superpowers/specs/2026-08-26-web-search.md`](docs/superpowers/specs/2026-08-26-web-search.md):
+a client-side tool loop over the existing `toolCallDelta` plumbing, with a
+`SearchProvider` protocol (Brave first) and hard round/result caps. It carries
+four open questions the implementer has to answer first — chiefly whether the
+`@cf` models hold the tool contract, and whether one more device-side secret is
+acceptable given "provider keys never on device".

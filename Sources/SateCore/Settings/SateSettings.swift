@@ -7,7 +7,8 @@ import Foundation
 public struct SateSettings: Codable, Sendable, Hashable {
     public var accountID: String
     public var gatewayID: String
-    /// Free-form `provider/model` string; the gateway resolves it.
+    /// A `ModelCatalog` id, or any free-form `provider/model` string the gateway
+    /// resolves. The picker offers the catalog and keeps a Custom row for the rest.
     public var defaultModel: String
     /// Separate, cheap model used for auto-titling a conversation, so titling
     /// never burns frontier tokens. User-editable like any other model string.
@@ -31,8 +32,8 @@ public struct SateSettings: Codable, Sendable, Hashable {
     public init() {
         accountID = ""
         gatewayID = ""
-        defaultModel = "anthropic/claude-opus-5"
-        titleModel = "openai/gpt-5.2-mini"
+        defaultModel = ModelCatalog.defaultChat.id
+        titleModel = ModelCatalog.defaultTitle.id
         systemPrompt = SystemPrompt.researchAssistant
         temperature = nil
         maxTokens = 4096
@@ -58,7 +59,7 @@ public struct SateSettings: Codable, Sendable, Hashable {
             window.model = model
             return window
         }
-        return ContextWindow(model: model)
+        return ModelCatalog.window(for: model) ?? ContextWindow(model: model)
     }
 
     private enum CodingKeys: String, CodingKey {

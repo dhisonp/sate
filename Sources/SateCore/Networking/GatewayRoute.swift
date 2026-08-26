@@ -50,6 +50,23 @@ public enum GatewayRoute: Hashable, Sendable {
         }
     }
 
+    /// The two hosts spell Workers AI models differently: REST takes the bare
+    /// `@cf/author/model`, the compat host qualifies it as
+    /// `workers-ai/@cf/author/model`. The catalog stores the REST form, so the
+    /// rewrite happens here — once, at the point the route is already known —
+    /// rather than leaking a route concern into settings or the codec.
+    public func wireModel(_ model: String) -> String {
+        let qualified = ModelCatalog.compatProviderPrefix + ModelCatalog.workersAIPrefix
+        switch self {
+        case .rest:
+            guard model.hasPrefix(qualified) else { return model }
+            return String(model.dropFirst(ModelCatalog.compatProviderPrefix.count))
+        case .compat:
+            guard model.hasPrefix(ModelCatalog.workersAIPrefix) else { return model }
+            return ModelCatalog.compatProviderPrefix + model
+        }
+    }
+
     /// `dynamic/*` model strings only resolve on the compat endpoint.
     public static func modelRequiresCompat(_ model: String) -> Bool {
         model.hasPrefix("dynamic/")

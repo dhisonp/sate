@@ -209,14 +209,26 @@ public actor GatewayClient: LLMStreaming {
         guard let url = route.url else { throw GatewayError.notConfigured }
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
-        urlRequest.httpBody = try codec.encodeBody(request, stream: true)
+        var routed = request
+        routed.model = route.wireModel(request.model)
+        urlRequest.httpBody = try codec.encodeBody(routed, stream: true)
 
         // The Cloudflare token goes in the header this route reserves for it; a
         // provider Authorization/x-api-key is never sent — BYOK supplies it, and
         // sending one breaks unified billing.
         urlRequest.setValue("Bearer \(configuration.token)", forHTTPHeaderField: route.authHeaderName)
-        if case .rest = route, let gatewayID = configuration.gatewayID, !gatewayID.isEmpty {
-            urlRequest.setValue(gatewayID, forHTTPHeaderField: GatewayHeader.gatewayID)
+        if case .rest = route {
+            // Workers AI on REST *requires* the gateway id; other providers only
+            // need it to pick a non-default gateway. `default` is the gateway
+            // Cloudflare creates with every account, so falling back to it keeps
+            // an @cf model working on a fresh install that has set only an
+            // account id and a token.
+            let configured = configuration.gatewayID ?? ""
+            let gatewayID = configured.isEmpty && ModelCatalog.isWorkersAI(routed.model)
+                ? "default" : configured
+            if !gatewayID.isEmpty {
+                urlRequest.setValue(gatewayID, forHTTPHeaderField: GatewayHeader.gatewayID)
+            }
         }
         urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")

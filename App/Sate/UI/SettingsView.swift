@@ -70,22 +70,12 @@ struct SettingsView: View {
             }
 
             Section {
-                LabeledContent("Default model") {
-                    TextField("provider/model", text: $env.settings.defaultModel)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .multilineTextAlignment(.trailing)
-                }
-                LabeledContent("Title model") {
-                    TextField("provider/model", text: $env.settings.titleModel)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .multilineTextAlignment(.trailing)
-                }
+                ModelField(title: "Default model", model: $env.settings.defaultModel)
+                ModelField(title: "Title model", model: $env.settings.titleModel)
             } header: {
                 Text("Models")
             } footer: {
-                Text("Free-form strings resolved by the gateway. The title model is used only for auto-naming conversations.")
+                Text("The list is Cloudflare's own @cf models: they run on Workers AI, so they need no provider key of yours. Custom takes any provider/model string the gateway resolves. The title model is used only for auto-naming conversations.")
             }
 
             Section {
@@ -156,5 +146,59 @@ struct SettingsView: View {
                 env.settings.temperature = 0.7
             }
         }
+    }
+}
+
+/// A model row that is a picker over `ModelCatalog` with a Custom escape hatch.
+///
+/// The catalog is a convenience, not a whitelist: the gateway resolves any
+/// `provider/model` string, and removing free-form entry would cut off every
+/// non-Workers-AI provider. So Custom is a first-class row, and any value that
+/// is not in the catalog opens the field already in that mode.
+private struct ModelField: View {
+    let title: String
+    @Binding var model: String
+
+    @State private var isCustom = false
+
+    private static let customTag = "\u{0}custom"
+
+    var body: some View {
+        Picker(title, selection: selection) {
+            ForEach(ModelCatalog.all) { option in
+                Text(option.displayName).tag(option.id)
+            }
+            Text("Custom…").tag(Self.customTag)
+        }
+        // Set before the picker is read, so a stored custom string never flashes
+        // as the first catalog entry.
+        .onAppear { isCustom = !ModelCatalog.contains(model) }
+
+        if isCustom {
+            TextField("provider/model", text: $model)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .font(.system(.body, design: .monospaced))
+        } else if let option = ModelCatalog.option(id: model) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(option.summary)
+                Text("\(option.contextTokens.formatted()) token context\(option.reasons ? " · reasoning" : "")")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private var selection: Binding<String> {
+        Binding(
+            get: { isCustom ? Self.customTag : model },
+            set: { newValue in
+                if newValue == Self.customTag {
+                    isCustom = true
+                } else {
+                    isCustom = false
+                    model = newValue
+                }
+            })
     }
 }
