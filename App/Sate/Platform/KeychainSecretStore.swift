@@ -25,7 +25,7 @@ struct KeychainSecretStore: SecretStore {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.service,
-            kSecAttrAccount as String: Self.account
+            kSecAttrAccount as String: Self.account,
         ]
     }
 
@@ -37,7 +37,9 @@ struct KeychainSecretStore: SecretStore {
         var item: CFTypeRef?
         let status = SecItemCopyMatching(lookup as CFDictionary, &item)
         // "Nothing stored yet" is the normal first-launch state, not a failure.
-        if status == errSecItemNotFound { return nil }
+        if status == errSecItemNotFound {
+            return nil
+        }
         guard status == errSecSuccess else { throw Failure.keychain(status) }
         guard let data = item as? Data, let value = String(data: data, encoding: .utf8),
               !value.isEmpty
@@ -56,14 +58,16 @@ struct KeychainSecretStore: SecretStore {
 
         let attributes: [String: Any] = [
             kSecValueData as String: Data(token.utf8),
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
         ]
 
         // Update first: `SecItemAdd` on an existing item fails with
         // `errSecDuplicateItem`, and deleting-then-adding would leave a window
         // where a rotation that fails halfway has removed the working token.
         let updated = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-        if updated == errSecSuccess { return }
+        if updated == errSecSuccess {
+            return
+        }
         guard updated == errSecItemNotFound else { throw Failure.keychain(updated) }
 
         var insert = query

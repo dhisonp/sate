@@ -1,19 +1,19 @@
 import Foundation
-import Testing
 @testable import SateCore
+import Testing
 
 // MARK: - Helpers
 
 private func fixtureBytes(_ name: String) throws -> [UInt8] {
     if let url = Bundle.module.url(forResource: name, withExtension: "sse", subdirectory: "Fixtures") {
-        return Array(try Data(contentsOf: url))
+        return try Array(Data(contentsOf: url))
     }
     // Fallback for toolchains/IDEs that do not stage the resource bundle.
     let url = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()
         .appendingPathComponent("Fixtures")
         .appendingPathComponent("\(name).sse")
-    return Array(try Data(contentsOf: url))
+    return try Array(Data(contentsOf: url))
 }
 
 /// Feeds `bytes` in fixed-size chunks; returns the events plus whether a
@@ -28,7 +28,7 @@ private func parse(
     var index = 0
     while index < bytes.count {
         let end = chunkSize == Int.max ? bytes.count : min(index + chunkSize, bytes.count)
-        events += try parser.consume(bytes[index..<end])
+        events += try parser.consume(bytes[index ..< end])
         index = end
     }
     return (events, parser.finish())
@@ -310,7 +310,7 @@ struct SSEParserChunkingTests {
             while index < bytes.count {
                 let size = Int(random.next() % 37) + 1
                 let end = min(index + size, bytes.count)
-                events += try parser.consume(bytes[index..<end])
+                events += try parser.consume(bytes[index ..< end])
                 index = end
             }
             #expect(events == baseline.events, "seed \(seed) diverged for \(name)")
@@ -335,7 +335,10 @@ struct SSEParserChunkingTests {
 
 private struct LCG {
     private var state: UInt64
-    init(seed: UInt64) { state = seed }
+    init(seed: UInt64) {
+        state = seed
+    }
+
     mutating func next() -> UInt64 {
         state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
         return state >> 17
@@ -354,7 +357,7 @@ struct SSEParserLimitTests {
             _ = try parser.consume(payload)
             Issue.record("expected a protocolError")
         } catch let error as GatewayError {
-            guard case .protocolError(let message) = error else {
+            guard case let .protocolError(message) = error else {
                 Issue.record("expected protocolError, got \(error)")
                 return
             }
@@ -365,7 +368,7 @@ struct SSEParserLimitTests {
     @Test func theCapIsPerEventNotPerStream() throws {
         var parser = SSEParser(maxEventBytes: 64)
         var events: [SSEEvent] = []
-        for _ in 0..<50 {
+        for _ in 0 ..< 50 {
             events += try parser.consume(Array("data: small\n\n".utf8))
         }
         #expect(events.count == 50)

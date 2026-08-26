@@ -13,10 +13,10 @@ public enum GatewayRoute: Hashable, Sendable {
 
     public var url: URL? {
         switch self {
-        case .rest(let accountID, _):
+        case let .rest(accountID, _):
             return URL(string:
                 "https://api.cloudflare.com/client/v4/accounts/\(accountID)/ai/v1/chat/completions")
-        case .compat(let accountID, let gatewayID):
+        case let .compat(accountID, gatewayID):
             return URL(string:
                 "https://gateway.ai.cloudflare.com/v1/\(accountID)/\(gatewayID)/compat/chat/completions")
         }
@@ -39,7 +39,9 @@ public enum GatewayRoute: Hashable, Sendable {
     }
 
     public var supportsDynamicRoutes: Bool {
-        if case .compat = self { return true }
+        if case .compat = self {
+            return true
+        }
         return false
     }
 

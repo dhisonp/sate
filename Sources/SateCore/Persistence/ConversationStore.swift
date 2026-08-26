@@ -25,7 +25,9 @@ enum SessionCoding {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
             let text = try decoder.singleValueContainer().decode(String.self)
-            if let date = try? style.parse(text) { return date }
+            if let date = try? style.parse(text) {
+                return date
+            }
             // Tolerate whole-second stamps: hand-edited files and older writers.
             return try fallbackStyle.parse(text)
         }
@@ -122,7 +124,7 @@ public actor ConversationStore {
 
     public init(directory: URL) {
         self.directory = directory
-        self.index = ConversationIndex(directory: directory)
+        index = ConversationIndex(directory: directory)
     }
 
     // MARK: Locations
@@ -153,7 +155,8 @@ public actor ConversationStore {
             title: header.title,
             model: header.model,
             updatedAt: header.createdAt,
-            messageCount: 0))
+            messageCount: 0
+        ))
         return header
     }
 
@@ -194,31 +197,43 @@ public actor ConversationStore {
             // so `try?` here only catches structurally broken JSON.
             guard let entry = try? decoder.decode(SessionEntry.self, from: line) else { continue }
             switch entry {
-            case .header(let decoded):
-                if header == nil { header = decoded }
-            case .message(let message):
+            case let .header(decoded):
+                if header == nil {
+                    header = decoded
+                }
+            case let .message(message):
                 if messagesByID.updateValue(message, forKey: message.id) == nil {
                     appendOrder[message.id] = appendOrder.count
                     childrenByParent[message.parentID, default: []].append(message.id)
                 }
-            case .leaf(let id, _):
-                leafID = id           // last one wins
-            case .update(let title, let model, _):
-                if let title { titleOverride = title }
-                if let model { modelOverride = model }
+            case let .leaf(id, _):
+                leafID = id // last one wins
+            case let .update(title, model, _):
+                if let title {
+                    titleOverride = title
+                }
+                if let model {
+                    modelOverride = model
+                }
             case .unknown:
                 continue
             }
         }
 
         guard var header else { throw ConversationStoreError.missingHeader(id) }
-        if let titleOverride { header.title = titleOverride }
-        if let modelOverride { header.model = modelOverride }
+        if let titleOverride {
+            header.title = titleOverride
+        }
+        if let modelOverride {
+            header.model = modelOverride
+        }
 
         for (parent, children) in childrenByParent {
             childrenByParent[parent] = children.sorted { lhs, rhs in
                 let left = messagesByID[lhs], right = messagesByID[rhs]
-                if let l = left?.timestamp, let r = right?.timestamp, l != r { return l < r }
+                if let l = left?.timestamp, let r = right?.timestamp, l != r {
+                    return l < r
+                }
                 // Equal timestamps happen within a millisecond; falling back to
                 // append order keeps "2 of 3" labels stable across loads.
                 return (appendOrder[lhs] ?? 0) < (appendOrder[rhs] ?? 0)
@@ -234,7 +249,8 @@ public actor ConversationStore {
             header: header,
             messagesByID: messagesByID,
             childrenByParent: childrenByParent,
-            leafID: leafID)
+            leafID: leafID
+        )
     }
 
     // MARK: Mutation
@@ -267,7 +283,8 @@ public actor ConversationStore {
         discardCheckpointFile(id)
         try append(
             .leaf(id: message.id, timestamp: message.timestamp),
-            to: target, id: id, durable: false)
+            to: target, id: id, durable: false
+        )
 
         summary.messageCount += 1
         summary.updatedAt = message.timestamp
@@ -300,10 +317,15 @@ public actor ConversationStore {
 
         let now = Date()
         try append(
-            .update(title: title, model: model, timestamp: now), to: target, id: id, durable: true)
+            .update(title: title, model: model, timestamp: now), to: target, id: id, durable: true
+        )
 
-        if let title { summary.title = title }
-        if let model { summary.model = model }
+        if let title {
+            summary.title = title
+        }
+        if let model {
+            summary.model = model
+        }
         summary.updatedAt = now
         try index.upsert(summary)
     }
@@ -329,7 +351,8 @@ public actor ConversationStore {
             text: text,
             reasoning: reasoning,
             model: model,
-            updatedAt: Date())
+            updatedAt: Date()
+        )
         try createDirectoryIfNeeded()
         try encoder.encode(record).write(to: inflightURL(conversationID), options: .atomic)
     }
@@ -356,12 +379,14 @@ public actor ConversationStore {
         guard manager.fileExists(atPath: directory.path) else { return [] }
 
         let contents = try manager.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+            at: directory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        )
 
         var recovered: [UUID] = []
         for url in contents where url.pathExtension == "inflight" {
             guard let data = try? Data(contentsOf: url),
-                  let record = try? decoder.decode(InflightCheckpoint.self, from: data) else {
+                  let record = try? decoder.decode(InflightCheckpoint.self, from: data)
+            else {
                 // Unreadable sidecar: nothing to recover, and leaving it would make
                 // every future launch retry the same failure.
                 try? manager.removeItem(at: url)
@@ -381,7 +406,8 @@ public actor ConversationStore {
                 reasoning: record.reasoning.isEmpty ? nil : record.reasoning,
                 model: record.model,
                 finishReason: .truncated,
-                interrupted: true)
+                interrupted: true
+            )
 
             // `append` deletes the sidecar itself, in its own turn.
             try append(message, to: record.conversationID)
@@ -404,7 +430,7 @@ public actor ConversationStore {
         _ entry: SessionEntry, to target: JSONLFile, id: UUID, durable: Bool
     ) throws {
         do {
-            try target.append(try encoder.encode(entry), durable: durable)
+            try target.append(encoder.encode(entry), durable: durable)
         } catch {
             repaired.remove(id)
             throw error
@@ -421,14 +447,17 @@ public actor ConversationStore {
     /// never seen this conversation (a file dropped into the directory by a
     /// restore, or an index rebuild that raced a delete).
     private func currentSummary(_ id: UUID) throws -> ConversationSummary {
-        if let existing = try index.summary(for: id) { return existing }
+        if let existing = try index.summary(for: id) {
+            return existing
+        }
         let snapshot = try load(id)
         return ConversationSummary(
             id: id,
             title: snapshot.header.title,
             model: snapshot.header.model,
             updatedAt: snapshot.header.createdAt,
-            messageCount: snapshot.messagesByID.count)
+            messageCount: snapshot.messagesByID.count
+        )
     }
 
     private func discardCheckpointFile(_ id: UUID) {

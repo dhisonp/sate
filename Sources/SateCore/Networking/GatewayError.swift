@@ -41,15 +41,15 @@ public enum GatewayError: Error, Hashable, Sendable {
     }
 }
 
-extension GatewayError {
+public extension GatewayError {
     /// Short, user-facing sentence. The debug panel shows the underlying detail.
-    public var userMessage: String {
+    var userMessage: String {
         switch self {
         case .notConfigured:
             return "Add your Cloudflare account ID and token in Settings."
         case .offline:
             return "You're offline."
-        case .connectionLost(let bytes):
+        case let .connectionLost(bytes):
             return bytes > 0 ? "Connection lost mid-response." : "Connection lost."
         case .idleTimeout:
             return "The model stopped responding."
@@ -57,22 +57,24 @@ extension GatewayError {
             return "Stopped."
         case .unauthorized:
             return "Cloudflare rejected the token. Check it is valid and has both Workers AI Read and AI Gateway Run."
-        case .notFound(let message):
+        case let .notFound(message):
             return "Not found — check the account, gateway, and model. \(message)"
-        case .badRequest(let message):
+        case let .badRequest(message):
             return message.isEmpty ? "The request was rejected." : message
-        case .rateLimited(let retryAfter, _):
-            if let retryAfter { return "Rate or spend limit reached. Try again in \(Int(retryAfter))s." }
+        case let .rateLimited(retryAfter, _):
+            if let retryAfter {
+                return "Rate or spend limit reached. Try again in \(Int(retryAfter))s."
+            }
             return "Rate or spend limit reached."
-        case .gatewayUnavailable(let status, _):
+        case let .gatewayUnavailable(status, _):
             return "Gateway error (\(status))."
         case .upstreamTimeout:
             return "The model took too long to start responding. It may still have been billed."
-        case .upstream(let status, _):
+        case let .upstream(status, _):
             return "Provider error (\(status))."
         case .protocolError:
             return "The response could not be read."
-        case .inStreamError(_, let message):
+        case let .inStreamError(_, message):
             return message
         }
     }

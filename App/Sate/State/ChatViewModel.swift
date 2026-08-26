@@ -41,6 +41,7 @@ final class ChatViewModel {
             persistModel()
         }
     }
+
     private(set) var lastTrace: NetworkTrace?
     private(set) var lastError: GatewayError?
 
@@ -78,8 +79,8 @@ final class ChatViewModel {
         self.store = store
         self.session = session
         self.environment = environment
-        self.title = "New Conversation"
-        self.model = environment.settings.defaultModel
+        title = "New Conversation"
+        model = environment.settings.defaultModel
     }
 
     /// True when the newest assistant message can be continued.
@@ -175,7 +176,9 @@ final class ChatViewModel {
         guard let original = message(messageID), original.role == .user else { return }
         // Fork-mid-stream ordering (R2.5): cancel and let the interrupted partial
         // land before the new branch is appended.
-        if phase.isBusy { await session.cancelAndWait() }
+        if phase.isBusy {
+            await session.cancelAndWait()
+        }
 
         if let parentID = original.parentID, let index = messages.firstIndex(where: { $0.id == parentID }) {
             messages = Array(messages[...index])
@@ -252,7 +255,8 @@ final class ChatViewModel {
         let systemPrompt = SystemPrompt.resolve(settings.systemPrompt)
         let context = shrunk
             ? builder.rebuild(
-                branch: branch, systemPrompt: systemPrompt, window: window, shrinkTo: 0.75)
+                branch: branch, systemPrompt: systemPrompt, window: window, shrinkTo: 0.75
+            )
             : builder.build(branch: branch, systemPrompt: systemPrompt, window: window)
 
         // The builder already put the system prompt at the head of `messages`, so
@@ -263,14 +267,16 @@ final class ChatViewModel {
             systemPrompt: nil,
             maxTokens: settings.maxTokens,
             temperature: settings.temperature,
-            includeUsage: settings.includeUsage)
+            includeUsage: settings.includeUsage
+        )
         attempt = Attempt(request: request, parentID: parentID, branch: branch, shrunk: shrunk)
 
         let started = await session.start(
             request: request,
             client: environment.client,
             parentID: parentID,
-            events: makeEvents())
+            events: makeEvents()
+        )
         guard started else {
             // Another generation for this conversation is still running.
             stopElapsedTicker()
@@ -290,10 +296,11 @@ final class ChatViewModel {
             },
             completed: { [weak self] outcome in
                 self?.handleCompletion(outcome)
-            })
+            }
+        )
     }
 
-    private func handleStarted(responseID: String?, model: String?) {
+    private func handleStarted(responseID _: String?, model _: String?) {
         guard phase == .sending else { return }
         phase = .awaitingFirstToken
     }
@@ -303,29 +310,38 @@ final class ChatViewModel {
         // A late tail can arrive after the terminal callback; it is already in the
         // committed message, so rendering it into the draft would duplicate it.
         guard draft.isActive else { return }
-        if draft.firstTokenAt == nil { draft.firstTokenAt = Date() }
+        if draft.firstTokenAt == nil {
+            draft.firstTokenAt = Date()
+        }
         draft.text += flush.text
         draft.reasoning += flush.reasoning
-        if phase.isBusy, phase != .streaming { phase = .streaming }
+        if phase.isBusy, phase != .streaming {
+            phase = .streaming
+        }
     }
 
     private func handleCompletion(_ outcome: GenerationOutcome) {
-        if let trace = outcome.trace { lastTrace = trace }
+        if let trace = outcome.trace {
+            lastTrace = trace
+        }
         stopElapsedTicker()
 
         // R4: a context-length 400 happens before anything is generated, so
         // re-trimming and re-sending once is safe and free of duplicate output.
         if let error = outcome.error,
-           case .badRequest(let message) = error,
+           case let .badRequest(message) = error,
            ContextBuilder.isContextLengthError(message),
            outcome.committed == nil,
-           let attempt, !attempt.shrunk {
+           let attempt, !attempt.shrunk
+        {
             narrowWindow()
             Task { await self.run(parentID: attempt.parentID, branch: attempt.branch, shrunk: true) }
             return
         }
 
-        if let message = outcome.committed { record(message) }
+        if let message = outcome.committed {
+            record(message)
+        }
         calibrateEstimator(with: outcome)
         draft.end()
 
@@ -335,7 +351,7 @@ final class ChatViewModel {
         case .some(.cancelled):
             // A deliberate stop is not a failure; the partial carries the tag.
             phase = .interrupted
-        case .some(let error):
+        case let .some(error):
             lastError = error
             // A partial that reached disk is worth more than the error that ended
             // it: `.interrupted` offers Continue, which resumes from the partial,
@@ -359,7 +375,7 @@ final class ChatViewModel {
     private func narrowWindow() {
         var window = environment.settings.window(for: model)
         let shrunk = Int(Double(window.effectiveBudgetTokens) * 0.75)
-        window.inputBudgetTokens = max(shrunk, 1_000) + window.reserveForOutputTokens
+        window.inputBudgetTokens = max(shrunk, 1000) + window.reserveForOutputTokens
         environment.settings.contextWindows[model] = window
     }
 

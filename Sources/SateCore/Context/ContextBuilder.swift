@@ -10,7 +10,7 @@ public struct ContextWindow: Sendable, Hashable, Codable {
     /// against one window.
     public var reserveForOutputTokens: Int
 
-    public init(model: String, inputBudgetTokens: Int = 100_000, reserveForOutputTokens: Int = 8_000) {
+    public init(model: String, inputBudgetTokens: Int = 100_000, reserveForOutputTokens: Int = 8000) {
         self.model = model
         self.inputBudgetTokens = inputBudgetTokens
         self.reserveForOutputTokens = reserveForOutputTokens
@@ -29,7 +29,7 @@ public struct ContextWindow: Sendable, Hashable, Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         model = try container.decodeIfPresent(String.self, forKey: .model) ?? ""
         inputBudgetTokens = try container.decodeIfPresent(Int.self, forKey: .inputBudgetTokens) ?? 100_000
-        reserveForOutputTokens = try container.decodeIfPresent(Int.self, forKey: .reserveForOutputTokens) ?? 8_000
+        reserveForOutputTokens = try container.decodeIfPresent(Int.self, forKey: .reserveForOutputTokens) ?? 8000
     }
 }
 
@@ -99,7 +99,9 @@ public struct ContextBuilder: Sendable {
         }
 
         var messages: [Message] = []
-        if let systemMessage { messages.append(systemMessage) }
+        if let systemMessage {
+            messages.append(systemMessage)
+        }
         var keptBranchCount = 0
         for (position, group) in groups.enumerated() where !dropped.contains(position) {
             messages.append(contentsOf: group.messages)
@@ -143,7 +145,7 @@ public struct ContextBuilder: Sendable {
             "maximum context",
             "too many tokens",
             "prompt is too long",
-            "input length and max_tokens exceed"
+            "input length and max_tokens exceed",
         ]
         return patterns.contains { normalized.contains($0) }
     }
@@ -161,7 +163,8 @@ public struct ContextBuilder: Sendable {
             // An assistant turn interrupted before its first token has no content;
             // several backends 400 on empty assistant content, so it never ships.
             if message.role == .assistant,
-               message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+               message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
                 return nil
             }
             var copy = message

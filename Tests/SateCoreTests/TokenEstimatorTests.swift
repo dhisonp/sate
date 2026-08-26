@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 @testable import SateCore
+import Testing
 
 @Suite("TokenEstimator")
 struct TokenEstimatorTests {
@@ -31,7 +31,7 @@ struct TokenEstimatorTests {
         let estimator = TokenEstimator()
         let messages = [
             Message.user(String(repeating: "a", count: 360)),
-            Message(role: .assistant, content: [.text(String(repeating: "b", count: 360))])
+            Message(role: .assistant, content: [.text(String(repeating: "b", count: 360))]),
         ]
         // 2 messages * (100 + 4) plus a 36-char system prompt (10 + 4).
         let expected = 2 * (100 + TokenEstimator.perMessageOverheadTokens)
@@ -44,7 +44,7 @@ struct TokenEstimatorTests {
         let estimator = TokenEstimator()
         var message = Message(role: .assistant, content: [.text("hello")])
         let withoutReasoning = estimator.estimate([message], systemPrompt: nil, model: model)
-        message.reasoning = String(repeating: "r", count: 10_000)
+        message.reasoning = String(repeating: "r", count: 10000)
         #expect(estimator.estimate([message], systemPrompt: nil, model: model) == withoutReasoning)
     }
 
@@ -59,7 +59,7 @@ struct TokenEstimatorTests {
         #expect(abs(afterOne - (3.6 * 0.7 + 2.0 * 0.3)) < 0.000_001)
 
         // Repeated identical samples converge on the observation.
-        for _ in 0..<20 {
+        for _ in 0 ..< 20 {
             estimator.calibrate(model: model, characters: 2000, promptTokens: 1000)
         }
         #expect(abs(estimator.charactersPerToken(for: model) - 2.0) < 0.01)
@@ -93,7 +93,7 @@ struct TokenEstimatorTests {
     @Test("A single bad sample cannot poison an established ratio")
     func badSampleDoesNotPoison() {
         var estimator = TokenEstimator()
-        for _ in 0..<20 {
+        for _ in 0 ..< 20 {
             estimator.calibrate(model: model, characters: 2000, promptTokens: 1000)
         }
         let established = estimator.charactersPerToken(for: model)

@@ -13,7 +13,9 @@ struct InputBar: View {
     @Bindable var vm: ChatViewModel
     @FocusState private var isFocused: Bool
 
-    private var isBusy: Bool { vm.phase.isBusy }
+    private var isBusy: Bool {
+        vm.phase.isBusy
+    }
 
     private var canSend: Bool {
         !vm.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -26,7 +28,7 @@ struct InputBar: View {
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
             TextField("Message", text: $vm.input, axis: .vertical)
-                .lineLimit(1...6)
+                .lineLimit(1 ... 6)
                 .textFieldStyle(.plain)
                 .focused($isFocused)
                 .submitLabel(.return)
@@ -41,7 +43,6 @@ struct InputBar: View {
         .padding(.bottom, 8)
     }
 
-    @ViewBuilder
     private var actionButton: some View {
         Group {
             if isBusy {

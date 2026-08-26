@@ -101,9 +101,10 @@ struct ConversationListView: View {
             env.recoveredCount == 1
                 ? "1 interrupted response recovered"
                 : "\(env.recoveredCount) interrupted responses recovered",
-            systemImage: "arrow.uturn.backward.circle")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
+            systemImage: "arrow.uturn.backward.circle"
+        )
+        .font(.footnote)
+        .foregroundStyle(.secondary)
     }
 
     @ViewBuilder

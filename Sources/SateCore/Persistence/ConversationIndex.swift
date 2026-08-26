@@ -39,14 +39,16 @@ final class ConversationIndex {
 
     init(directory: URL) {
         self.directory = directory
-        self.indexURL = directory.appending(path: "index.json")
+        indexURL = directory.appending(path: "index.json")
     }
 
     /// All rows, newest activity first.
     func summaries() throws -> [ConversationSummary] {
         try loadIfNeeded()
         return byID.values.sorted { lhs, rhs in
-            if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt > rhs.updatedAt }
+            if lhs.updatedAt != rhs.updatedAt {
+                return lhs.updatedAt > rhs.updatedAt
+            }
             // Deterministic tiebreak so list order is stable across launches when
             // several conversations share a timestamp (rebuild from mtime can).
             return lhs.id.uuidString < rhs.id.uuidString
@@ -82,7 +84,7 @@ final class ConversationIndex {
         if let cached = readIndexFile() {
             byID = Dictionary(cached.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
         } else {
-            byID = Dictionary(try rebuild().map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
+            byID = try Dictionary(rebuild().map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
             // Persist the repair so the next launch takes the fast path.
             try? persist()
         }
@@ -118,7 +120,8 @@ final class ConversationIndex {
         let contents = try manager.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.contentModificationDateKey],
-            options: [.skipsHiddenFiles])
+            options: [.skipsHiddenFiles]
+        )
 
         return contents.filter { $0.pathExtension == "jsonl" }.compactMap(summarize)
     }
@@ -141,14 +144,20 @@ final class ConversationIndex {
             case "header":
                 if header == nil,
                    let entry = try? decoder.decode(SessionEntry.self, from: line),
-                   case .header(let decoded) = entry {
+                   case let .header(decoded) = entry
+                {
                     header = decoded
                 }
             case "update":
                 if let entry = try? decoder.decode(SessionEntry.self, from: line),
-                   case .update(let newTitle, let newModel, _) = entry {
-                    if let newTitle { title = newTitle }
-                    if let newModel { model = newModel }
+                   case let .update(newTitle, newModel, _) = entry
+                {
+                    if let newTitle {
+                        title = newTitle
+                    }
+                    if let newModel {
+                        model = newModel
+                    }
                 }
             default:
                 continue
@@ -163,7 +172,8 @@ final class ConversationIndex {
             title: title ?? header.title,
             model: model ?? header.model,
             updatedAt: modified ?? header.createdAt,
-            messageCount: messageCount)
+            messageCount: messageCount
+        )
     }
 }
 

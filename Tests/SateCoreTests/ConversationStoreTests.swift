@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import SateCore
+import Testing
 
 @Suite("ConversationStore")
 struct ConversationStoreTests {
@@ -49,7 +48,8 @@ struct ConversationStoreTests {
         let user = Message.user("hello")
         try await store.append(user, to: id)
         let reply = Message(
-            parentID: user.id, role: .assistant, content: [.text("hi")], finishReason: .stop)
+            parentID: user.id, role: .assistant, content: [.text("hi")], finishReason: .stop
+        )
         try await store.append(reply, to: id)
 
         let snapshot = try await store.load(id)
@@ -233,7 +233,8 @@ struct ConversationStoreTests {
             parentID: user.id,
             text: "partial answ",
             reasoning: "thinking",
-            model: "m")
+            model: "m"
+        )
 
         // Next launch.
         let relaunched = ConversationStore(directory: dir)
@@ -269,12 +270,14 @@ struct ConversationStoreTests {
         try await store.append(user, to: id)
 
         try await store.checkpoint(
-            conversationID: id, parentID: user.id, text: "partial", reasoning: "", model: "m")
+            conversationID: id, parentID: user.id, text: "partial", reasoning: "", model: "m"
+        )
         let final = Message(
             parentID: user.id,
             role: .assistant,
             content: [.text("partial answer, complete")],
-            finishReason: .stop)
+            finishReason: .stop
+        )
         try await store.append(final, to: id)
 
         let relaunched = ConversationStore(directory: dir)
@@ -295,10 +298,12 @@ struct ConversationStoreTests {
         try await store.append(user, to: id)
 
         try await store.checkpoint(
-            conversationID: id, parentID: user.id, text: "the answer", reasoning: "", model: "m")
+            conversationID: id, parentID: user.id, text: "the answer", reasoning: "", model: "m"
+        )
         let final = Message(
             parentID: user.id, role: .assistant, content: [.text("the answer")],
-            finishReason: .stop)
+            finishReason: .stop
+        )
 
         // ENOSPC (or an F_FULLFSYNC refusal) on the SECOND line of the commit,
         // after the message line is already on disk. Scoped to this test's file.
@@ -340,9 +345,10 @@ struct ConversationStoreTests {
         let id = try await store.create(title: "T", model: "m").conversationID
 
         try await store.checkpoint(
-            conversationID: id, parentID: nil, text: "x", reasoning: "", model: "m")
+            conversationID: id, parentID: nil, text: "x", reasoning: "", model: "m"
+        )
         try await store.clearCheckpoint(id)
-        try await store.clearCheckpoint(id)  // repeat is safe
+        try await store.clearCheckpoint(id) // repeat is safe
 
         #expect(try await store.recoverCheckpoints().isEmpty)
     }
@@ -355,7 +361,8 @@ struct ConversationStoreTests {
         let id = try await store.create(title: "T", model: "m").conversationID
 
         try await store.checkpoint(
-            conversationID: id, parentID: nil, text: "x", reasoning: "", model: "m")
+            conversationID: id, parentID: nil, text: "x", reasoning: "", model: "m"
+        )
         try await store.delete(id)
 
         #expect(try await store.recoverCheckpoints().isEmpty)
@@ -377,7 +384,8 @@ struct ConversationStoreTests {
         // the index over it used to TRAP, so the conversation-list screen — the
         // app's first screen — could not be drawn at all.
         try FileManager.default.copyItem(
-            at: transcriptURL(dir, id), to: dir.appending(path: "\(id.uuidString) 2.jsonl"))
+            at: transcriptURL(dir, id), to: dir.appending(path: "\(id.uuidString) 2.jsonl")
+        )
         try FileManager.default.removeItem(at: dir.appending(path: "index.json"))
 
         let rebuilt = ConversationStore(directory: dir)
@@ -406,7 +414,8 @@ struct ConversationStoreTests {
         let user = Message.user("hi")
         try await store.append(user, to: first)
         try await store.append(
-            Message(parentID: user.id, role: .assistant, content: [.text("yo")]), to: first)
+            Message(parentID: user.id, role: .assistant, content: [.text("yo")]), to: first
+        )
         try await store.update(title: "Alpha Renamed", model: nil, for: first)
 
         try FileManager.default.removeItem(at: dir.appending(path: "index.json"))
@@ -483,7 +492,7 @@ struct ConversationStoreTests {
         let store = ConversationStore(directory: dir)
         let id = try await store.create(title: "T", model: "m").conversationID
 
-        let messages = (0..<20).map { Message.user("turn \($0)") }
+        let messages = (0 ..< 20).map { Message.user("turn \($0)") }
         try await withThrowingTaskGroup(of: Void.self) { group in
             for message in messages {
                 group.addTask { try await store.append(message, to: id) }
@@ -497,6 +506,6 @@ struct ConversationStoreTests {
 
         let (lines, partial) = try JSONLFile(url: transcriptURL(dir, id)).readLines()
         #expect(partial == false)
-        #expect(lines.count == 41)  // header + 20 * (message + leaf)
+        #expect(lines.count == 41) // header + 20 * (message + leaf)
     }
 }

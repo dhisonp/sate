@@ -115,7 +115,9 @@ actor ConversationSession {
         self.store = store
     }
 
-    var isGenerating: Bool { task != nil }
+    var isGenerating: Bool {
+        task != nil
+    }
 
     /// Starts a generation. Returns false when one is already in flight for this
     /// conversation (R2.10: max one).
@@ -138,7 +140,8 @@ actor ConversationSession {
                 parentID: parentID,
                 conversationID: conversationID,
                 store: store,
-                events: events)
+                events: events
+            )
             // Cleared before the callback so `isGenerating` is already false when
             // the view model reacts and, e.g., immediately starts a retry.
             await self?.clearTask()
@@ -202,15 +205,15 @@ actor ConversationSession {
         do {
             for try await event in client.stream(request, conversationID: conversationID) {
                 switch event {
-                case .started(let responseID, let model):
+                case let .started(responseID, model):
                     responseModel = model
                     await MainActor.run { events.started(responseID, model) }
-                case .textDelta(let delta):
+                case let .textDelta(delta):
                     text += delta
                     if buffer.append(text: delta) {
                         await MainActor.run { events.flushed(buffer) }
                     }
-                case .reasoningDelta(let delta):
+                case let .reasoningDelta(delta):
                     reasoning += delta
                     if buffer.append(reasoning: delta) {
                         await MainActor.run { events.flushed(buffer) }
@@ -219,20 +222,24 @@ actor ConversationSession {
                     // v1 does not execute tools; the event exists so an agent loop
                     // can be added without touching the transport.
                     continue
-                case .finished(let reason, let reported):
+                case let .finished(reason, reported):
                     finishReason = reason
-                    if let reported { usage = reported }
+                    if let reported {
+                        usage = reported
+                    }
                 }
 
                 if Date().timeIntervalSince(lastCheckpoint) >= checkpointInterval,
-                   !text.isEmpty || !reasoning.isEmpty {
+                   !text.isEmpty || !reasoning.isEmpty
+                {
                     lastCheckpoint = Date()
                     try? await store.checkpoint(
                         conversationID: conversationID,
                         parentID: parentID,
                         text: text,
                         reasoning: reasoning,
-                        model: request.model)
+                        model: request.model
+                    )
                 }
             }
         } catch let error as GatewayError {
@@ -260,7 +267,8 @@ actor ConversationSession {
             finishReason: finishReason,
             usage: usage,
             error: failure,
-            trace: await client.lastTrace)
+            trace: await client.lastTrace
+        )
 
         let clean = failure == nil && (finishReason?.isClean ?? false)
         if !text.isEmpty || !reasoning.isEmpty {
@@ -273,7 +281,8 @@ actor ConversationSession {
                 finishReason: finishReason ?? .truncated,
                 usage: usage,
                 interrupted: !clean,
-                logID: outcome.trace?.logID)
+                logID: outcome.trace?.logID
+            )
             do {
                 // `append` deletes the in-flight sidecar in the same actor turn,
                 // so nothing here may clear it again: a second delete could race

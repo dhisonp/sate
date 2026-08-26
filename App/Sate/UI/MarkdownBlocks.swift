@@ -47,7 +47,9 @@ struct MarkdownFence: Hashable {
         let run = body.prefix { $0 == first }
         guard run.count >= 3 else { return nil }
         let info = body.dropFirst(run.count).trimmingCharacters(in: .whitespaces)
-        if first == "`", info.contains("`") { return nil }
+        if first == "`", info.contains("`") {
+            return nil
+        }
         return MarkdownFence(marker: first, length: run.count, info: info)
     }
 
@@ -78,7 +80,9 @@ enum MarkdownParagraphs {
         for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
             if let fence = openFence {
                 current.append(line)
-                if fence.closes(line) { openFence = nil }
+                if fence.closes(line) {
+                    openFence = nil
+                }
                 continue
             }
             let leading = line.first
@@ -98,7 +102,9 @@ enum MarkdownParagraphs {
             }
             current.append(line)
         }
-        if !current.isEmpty { paragraphs.append(current.joined(separator: "\n")) }
+        if !current.isEmpty {
+            paragraphs.append(current.joined(separator: "\n"))
+        }
         return paragraphs
     }
 }
@@ -153,7 +159,8 @@ enum MarkdownBlockParser {
                 emit(.code(
                     language: fence.info.isEmpty ? nil : fence.info,
                     code: body.joined(separator: "\n"),
-                    isClosed: closed))
+                    isClosed: closed
+                ))
                 continue
             }
 
@@ -184,7 +191,9 @@ enum MarkdownBlockParser {
                     let candidate = lines[index].trimmingCharacters(in: .whitespaces)
                     guard candidate.hasPrefix(">") else { break }
                     var rest = candidate.dropFirst()
-                    if rest.first == " " { rest = rest.dropFirst() }
+                    if rest.first == " " {
+                        rest = rest.dropFirst()
+                    }
                     quoted.append(String(rest))
                     index += 1
                 }
@@ -234,7 +243,7 @@ enum MarkdownBlockParser {
     private static func heading(_ trimmed: String) -> (level: Int, text: String)? {
         guard trimmed.first == "#" else { return nil }
         let hashes = trimmed.prefix { $0 == "#" }
-        guard (1...6).contains(hashes.count) else { return nil }
+        guard (1 ... 6).contains(hashes.count) else { return nil }
         let rest = trimmed.dropFirst(hashes.count)
         guard rest.isEmpty || rest.first == " " else { return nil }
         return (hashes.count, rest.trimmingCharacters(in: .whitespaces))
@@ -255,7 +264,8 @@ enum MarkdownBlockParser {
         return ListItem(
             ordered: true,
             number: Int(digits),
-            text: rest.trimmingCharacters(in: .whitespaces))
+            text: rest.trimmingCharacters(in: .whitespaces)
+        )
     }
 }
 
@@ -290,7 +300,9 @@ enum MarkdownCache {
     private static var order: [String] = []
 
     static func blocks(for source: String) -> [MarkdownBlock] {
-        if let cached = storage[source] { return cached }
+        if let cached = storage[source] {
+            return cached
+        }
         let parsed = MarkdownBlockParser.parse(source)
         storage[source] = parsed
         order.append(source)
@@ -316,10 +328,6 @@ enum MarkdownCache {
 struct MarkdownBlocksView: View, Equatable {
     let source: String
 
-    nonisolated static func == (lhs: MarkdownBlocksView, rhs: MarkdownBlocksView) -> Bool {
-        lhs.source == rhs.source
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(MarkdownCache.blocks(for: source)) { block in
@@ -332,12 +340,12 @@ struct MarkdownBlocksView: View, Equatable {
     @ViewBuilder
     private func view(for block: MarkdownBlock) -> some View {
         switch block.kind {
-        case .paragraph(let text):
+        case let .paragraph(text):
             Text(MarkdownInline.attributed(text))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-        case .heading(let level, let text):
+        case let .heading(level, text):
             Text(MarkdownInline.attributed(text))
                 .font(headingFont(level))
                 .fixedSize(horizontal: false, vertical: true)
@@ -345,10 +353,10 @@ struct MarkdownBlocksView: View, Equatable {
                 .padding(.top, level == 1 ? 6 : 2)
                 .accessibilityAddTraits(.isHeader)
 
-        case .code(let language, let code, let isClosed):
+        case let .code(language, code, isClosed):
             CodeBlockView(language: language, code: code, isClosed: isClosed)
 
-        case .quote(let text):
+        case let .quote(text):
             HStack(alignment: .top, spacing: 10) {
                 RoundedRectangle(cornerRadius: 1.5)
                     .fill(Color.accentColor.opacity(0.5))
@@ -359,7 +367,7 @@ struct MarkdownBlocksView: View, Equatable {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-        case .list(let ordered, let start, let items):
+        case let .list(ordered, start, items):
             VStack(alignment: .leading, spacing: 5) {
                 ForEach(Array(items.enumerated()), id: \.offset) { offset, item in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {

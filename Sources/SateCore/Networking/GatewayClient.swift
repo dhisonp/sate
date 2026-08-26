@@ -37,7 +37,7 @@ public struct GatewayConfiguration: Sendable {
         token: String = "",
         requestTimeoutMilliseconds: Int = 180_000,
         maxAttempts: Int = 2,
-        retryDelayMilliseconds: Int = 1_000,
+        retryDelayMilliseconds: Int = 1000,
         backoff: String = "exponential",
         collectLogPayload: Bool = true,
         metadata: [String: String] = [:],
@@ -72,8 +72,8 @@ public protocol LLMStreaming: Sendable {
     var lastTrace: NetworkTrace? { get async }
 }
 
-extension LLMStreaming {
-    public func stream(_ request: ChatCompletionRequest) -> AsyncThrowingStream<StreamEvent, any Error> {
+public extension LLMStreaming {
+    func stream(_ request: ChatCompletionRequest) -> AsyncThrowingStream<StreamEvent, any Error> {
         stream(request, conversationID: nil)
     }
 }
@@ -136,7 +136,8 @@ public actor GatewayClient: LLMStreaming {
         continuation: AsyncThrowingStream<StreamEvent, any Error>.Continuation
     ) async {
         let route = GatewayRoute.route(
-            for: request.model, accountID: configuration.accountID, gatewayID: configuration.gatewayID)
+            for: request.model, accountID: configuration.accountID, gatewayID: configuration.gatewayID
+        )
         var trace = NetworkTrace(route: route.name, model: request.model)
 
         guard configuration.isConfigured else {
@@ -238,11 +239,14 @@ public actor GatewayClient: LLMStreaming {
 
         urlRequest.setValue(
             String(configuration.requestTimeoutMilliseconds),
-            forHTTPHeaderField: GatewayHeader.requestTimeout)
+            forHTTPHeaderField: GatewayHeader.requestTimeout
+        )
         urlRequest.setValue(
-            String(configuration.maxAttempts), forHTTPHeaderField: GatewayHeader.maxAttempts)
+            String(configuration.maxAttempts), forHTTPHeaderField: GatewayHeader.maxAttempts
+        )
         urlRequest.setValue(
-            String(configuration.retryDelayMilliseconds), forHTTPHeaderField: GatewayHeader.retryDelay)
+            String(configuration.retryDelayMilliseconds), forHTTPHeaderField: GatewayHeader.retryDelay
+        )
         urlRequest.setValue(configuration.backoff, forHTTPHeaderField: GatewayHeader.backoff)
         if !configuration.collectLogPayload {
             urlRequest.setValue("false", forHTTPHeaderField: GatewayHeader.collectLogPayload)
@@ -256,7 +260,7 @@ public actor GatewayClient: LLMStreaming {
     /// `cf-aig-metadata` is a JSON string of at most 5 string values; extra keys
     /// are dropped deterministically (sorted) rather than risking a 400.
     private nonisolated func metadataHeader(conversationID: UUID?) -> String? {
-        var pairs: [(String, String)] = [("app", "sate")]
+        var pairs = [("app", "sate")]
         if let conversationID {
             pairs.append(("conversation", conversationID.uuidString))
         }
@@ -297,8 +301,12 @@ public actor GatewayClient: LLMStreaming {
         /// provider bug, and the first one describes the generation that ended.
         /// The LAST usage wins, because cumulative usage grows chunk by chunk.
         mutating func absorb(_ termination: ChatCompletionsCodec.ChunkTermination) {
-            if reason == nil, let observed = termination.reason { reason = observed }
-            if let usage = termination.usage { self.usage = usage }
+            if reason == nil, let observed = termination.reason {
+                reason = observed
+            }
+            if let usage = termination.usage {
+                self.usage = usage
+            }
         }
     }
 
@@ -325,7 +333,8 @@ public actor GatewayClient: LLMStreaming {
         guard let http = response as? HTTPURLResponse else {
             trace.duration = Date().timeIntervalSince(start)
             throw AttemptFailure(
-                error: .protocolError("Response was not HTTP"), trace: trace)
+                error: .protocolError("Response was not HTTP"), trace: trace
+            )
         }
         apply(http, to: &trace)
         // Status and Content-Type are settled BEFORE any byte is consumed: a 524
@@ -333,12 +342,13 @@ public actor GatewayClient: LLMStreaming {
         // "unexpected character" instead of "the model timed out".
         let contentType = (http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
 
-        guard (200..<300).contains(http.statusCode) else {
+        guard (200 ..< 300).contains(http.statusCode) else {
             let body = await Self.collect(bytes, limit: 64 * 1024)
             trace.duration = Date().timeIntervalSince(start)
             throw AttemptFailure(
                 error: Self.error(status: http.statusCode, headers: http, body: body),
-                trace: trace)
+                trace: trace
+            )
         }
 
         // Only `cancel()` is called on it, from the cancellation handler below.
@@ -348,11 +358,13 @@ public actor GatewayClient: LLMStreaming {
             return try await withTaskCancellationHandler {
                 if contentType.contains("text/event-stream") {
                     return try await streamSSE(
-                        bytes, trace: trace, start: start, continuation: continuation)
+                        bytes, trace: trace, start: start, continuation: continuation
+                    )
                 }
                 // A model (or a gateway fallback) that ignored `stream: true`.
                 return try await streamWholeBody(
-                    bytes, trace: trace, start: start, continuation: continuation)
+                    bytes, trace: trace, start: start, continuation: continuation
+                )
             } onCancel: {
                 dataTask.cancel()
             }
@@ -386,7 +398,9 @@ public actor GatewayClient: LLMStreaming {
         func settle(_ new: Value) {
             lock.lock()
             defer { lock.unlock() }
-            if value == nil { value = new }
+            if value == nil {
+                value = new
+            }
         }
 
         var settled: Value? {
@@ -441,9 +455,9 @@ public actor GatewayClient: LLMStreaming {
         }
 
         switch outcome.settled {
-        case .connected(let bytes, let response):
+        case let .connected(bytes, response):
             return (bytes, response)
-        case .failed(let error):
+        case let .failed(error):
             throw error
         case .expired, nil:
             throw GatewayError.offline
@@ -469,7 +483,9 @@ public actor GatewayClient: LLMStreaming {
             let events = try parser.consume(buffer)
             buffer.removeAll(keepingCapacity: true)
             for event in events {
-                if event.isTerminator { done = true; continue }
+                if event.isTerminator {
+                    done = true; continue
+                }
                 let (streamEvents, termination) = try codec.decodeChunk(dataPayload: event.data)
                 for streamEvent in streamEvents {
                     if case .started = streamEvent {
@@ -496,7 +512,9 @@ public actor GatewayClient: LLMStreaming {
                 if byte == 0x0A || byte == 0x0D || buffer.count >= 4096 {
                     try drain()
                 }
-                if done { break }
+                if done {
+                    break
+                }
             }
             try drain()
         } catch let error as GatewayError {
@@ -505,7 +523,8 @@ public actor GatewayClient: LLMStreaming {
         } catch {
             trace.duration = Date().timeIntervalSince(start)
             throw AttemptFailure(
-                error: Self.map(error, bytesReceived: trace.bytesReceived), trace: trace)
+                error: Self.map(error, bytesReceived: trace.bytesReceived), trace: trace
+            )
         }
 
         // An unterminated trailing event is discarded per the SSE spec; it also
@@ -528,7 +547,9 @@ public actor GatewayClient: LLMStreaming {
         var body: [UInt8] = []
         do {
             for try await byte in bytes {
-                if body.isEmpty { trace.timeToFirstByte = Date().timeIntervalSince(start) }
+                if body.isEmpty {
+                    trace.timeToFirstByte = Date().timeIntervalSince(start)
+                }
                 body.append(byte)
             }
         } catch {
@@ -542,7 +563,7 @@ public actor GatewayClient: LLMStreaming {
         var terminal = TerminalState()
         do {
             for event in try codec.decodeComplete(Data(body)) {
-                if case .finished(let reason, let usage) = event {
+                if case let .finished(reason, usage) = event {
                     // A whole non-streamed body is the complete answer, so its
                     // `finish_reason` (defaulted to `.stop` by the codec when the
                     // provider omits it) IS an observation, not a placeholder.
@@ -573,7 +594,9 @@ public actor GatewayClient: LLMStreaming {
         do {
             for try await byte in bytes {
                 body.append(byte)
-                if body.count >= limit { break }
+                if body.count >= limit {
+                    break
+                }
             }
         } catch {
             // A truncated or failed error body must never mask the status code.
@@ -614,14 +637,19 @@ public actor GatewayClient: LLMStreaming {
                 // Cloudflare's `errors[]`, then the OpenAI `error.message`, then
                 // the two bare-string shapes some providers emit.
                 if let message = root["errors"]?.arrayValue?.first?
-                    .objectValue?["message"]?.stringValue {
+                    .objectValue?["message"]?.stringValue
+                {
                     return message
                 }
                 if let message = root["error"]?.objectValue?["message"]?.stringValue {
                     return message
                 }
-                if let message = root["error"]?.stringValue { return message }
-                if let message = root["message"]?.stringValue { return message }
+                if let message = root["error"]?.stringValue {
+                    return message
+                }
+                if let message = root["message"]?.stringValue {
+                    return message
+                }
             }
         }
         let condensed = text
@@ -631,10 +659,14 @@ public actor GatewayClient: LLMStreaming {
     }
 
     private static func map(_ error: any Error, bytesReceived: Int) -> GatewayError {
-        if let gatewayError = error as? GatewayError { return gatewayError }
+        if let gatewayError = error as? GatewayError {
+            return gatewayError
+        }
         // Cancellation surfaces as CancellationError before the headers and as
         // URLError.cancelled after them; neither is a failure to report.
-        if error is CancellationError { return .cancelled }
+        if error is CancellationError {
+            return .cancelled
+        }
         guard let urlError = error as? URLError else {
             return .connectionLost(bytesReceived: bytesReceived)
         }
@@ -648,7 +680,9 @@ public actor GatewayClient: LLMStreaming {
         case .timedOut:
             return .idleTimeout(bytesReceived: bytesReceived)
         default:
-            if urlError.networkUnavailableReason != nil { return .offline }
+            if urlError.networkUnavailableReason != nil {
+                return .offline
+            }
             return .connectionLost(bytesReceived: bytesReceived)
         }
     }

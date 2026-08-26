@@ -1,7 +1,7 @@
 import Foundation
 
 #if canImport(Darwin)
-import Darwin
+    import Darwin
 #endif
 
 /// A durable append-only newline-delimited file.
@@ -42,7 +42,7 @@ public struct JSONLFile: Sendable {
     /// therefore unusable from a parallel test suite. `internal`, so only
     /// `@testable` code can reach it; nothing in the app can, and production never
     /// sets it (the read is one nil check per line written).
-    nonisolated(unsafe) internal static var shortWriteInjector: (@Sendable (URL, Data) -> Int?)?
+    nonisolated(unsafe) static var shortWriteInjector: (@Sendable (URL, Data) -> Int?)?
 
     // MARK: - Appending
 
@@ -82,7 +82,9 @@ public struct JSONLFile: Sendable {
         if let forced = Self.shortWriteInjector?(url, payload), written == payload.count {
             // Leave the file in exactly the state a real short write leaves it in,
             // then fall into the rollback below.
-            if start >= 0 { _ = ftruncate(fd, start + off_t(forced)) }
+            if start >= 0 {
+                _ = ftruncate(fd, start + off_t(forced))
+            }
             written = forced
         }
         guard written >= 0 else { throw Failure.writeFailed(errno) }
@@ -94,7 +96,9 @@ public struct JSONLFile: Sendable {
             // both entries become one unparseable line that `load` drops via
             // `try?` — including, potentially, a `leaf` line, which regresses the
             // branch pointer with no error anywhere.
-            if start >= 0 { _ = ftruncate(fd, start) }
+            if start >= 0 {
+                _ = ftruncate(fd, start)
+            }
             throw Failure.shortWrite(expected: payload.count, actual: written)
         }
 
@@ -189,9 +193,9 @@ public struct JSONLFile: Sendable {
 
     private static func fullSync(_ fd: Int32) throws {
         #if canImport(Darwin)
-        guard fcntl(fd, F_FULLFSYNC, 0) != -1 else { throw Failure.syncFailed(errno) }
+            guard fcntl(fd, F_FULLFSYNC, 0) != -1 else { throw Failure.syncFailed(errno) }
         #else
-        guard fsync(fd) == 0 else { throw Failure.syncFailed(errno) }
+            guard fsync(fd) == 0 else { throw Failure.syncFailed(errno) }
         #endif
     }
 
@@ -205,9 +209,10 @@ public struct JSONLFile: Sendable {
     /// the user's transcript.
     private func applyFileProtection() {
         #if os(iOS)
-        try? FileManager.default.setAttributes(
-            [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
-            ofItemAtPath: url.path)
+            try? FileManager.default.setAttributes(
+                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                ofItemAtPath: url.path
+            )
         #endif
     }
 }

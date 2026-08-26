@@ -32,7 +32,7 @@ public struct TokenEstimator: Sendable, Codable {
     public init(defaultCharactersPerToken: Double = 3.6) {
         // A non-positive default would divide by zero on the very first estimate.
         self.defaultCharactersPerToken = defaultCharactersPerToken > 0 ? defaultCharactersPerToken : 3.6
-        self.calibratedRatios = [:]
+        calibratedRatios = [:]
     }
 
     private enum CodingKeys: String, CodingKey {

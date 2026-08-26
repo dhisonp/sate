@@ -30,7 +30,7 @@ private struct RootView: View {
             ConversationListView(path: $path)
                 .navigationDestination(for: SateRoute.self) { route in
                     switch route {
-                    case .chat(let id):
+                    case let .chat(id):
                         // The view model is owned by the environment, not by this
                         // view: navigating back must not cancel a live generation.
                         ChatView(vm: env.viewModel(for: id))

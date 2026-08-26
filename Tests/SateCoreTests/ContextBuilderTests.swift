@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 @testable import SateCore
+import Testing
 
 private let testModel = "anthropic/claude-opus-5"
 
@@ -21,7 +21,7 @@ private func assistantMessage(_ characters: Int = 360, reasoning: String? = nil)
 /// `pairs` user/assistant exchanges followed by a fresh, unanswered user turn.
 private func branch(pairs: Int) -> [Message] {
     var messages: [Message] = []
-    for _ in 0..<pairs {
+    for _ in 0 ..< pairs {
         messages.append(userMessage())
         messages.append(assistantMessage())
     }
@@ -69,7 +69,7 @@ struct ContextBuilderTests {
 
     @Test("A single over-budget user message is still sent")
     func oversizedUserMessageSurvives() {
-        let huge = userMessage(36_000)
+        let huge = userMessage(36000)
         let window = ContextWindow(model: testModel, inputBudgetTokens: 100, reserveForOutputTokens: 0)
         let built = builder.build(branch: [huge], systemPrompt: "hi", window: window)
 
@@ -96,7 +96,7 @@ struct ContextBuilderTests {
 
     @Test("Reasoning is stripped and not counted")
     func stripsReasoning() {
-        let answer = assistantMessage(10, reasoning: text(10_000, "r"))
+        let answer = assistantMessage(10, reasoning: text(10000, "r"))
         let history = [userMessage(10), answer, userMessage(10)]
         let window = ContextWindow(model: testModel)
         let built = builder.build(branch: history, systemPrompt: nil, window: window)
@@ -168,7 +168,7 @@ struct ContextBuilderTests {
     @Test("A calibrated estimator changes what fits", arguments: [2.0, 6.0])
     func calibrationAffectsTrimming(ratio: Double) {
         var estimator = TokenEstimator()
-        for _ in 0..<20 {
+        for _ in 0 ..< 20 {
             estimator.calibrate(model: testModel, characters: Int(ratio * 1000), promptTokens: 1000)
         }
         var calibrated = ContextBuilder()
@@ -262,7 +262,7 @@ struct SateSettingsTests {
         settings.gatewayID = "gw"
         settings.temperature = 0.7
         settings.contextWindows["dynamic/route"] = ContextWindow(
-            model: "dynamic/route", inputBudgetTokens: 32_000, reserveForOutputTokens: 2_000
+            model: "dynamic/route", inputBudgetTokens: 32000, reserveForOutputTokens: 2000
         )
         let data = try JSONEncoder().encode(settings)
         #expect(try JSONDecoder().decode(SateSettings.self, from: data) == settings)
@@ -281,11 +281,11 @@ struct SateSettingsTests {
     func windowLookup() {
         var settings = SateSettings()
         settings.contextWindows["openai/gpt-5.2"] = ContextWindow(
-            model: "openai/gpt-5.2", inputBudgetTokens: 40_000, reserveForOutputTokens: 4_000
+            model: "openai/gpt-5.2", inputBudgetTokens: 40000, reserveForOutputTokens: 4000
         )
         let stored = settings.window(for: "openai/gpt-5.2")
-        #expect(stored.inputBudgetTokens == 40_000)
-        #expect(stored.effectiveBudgetTokens == 36_000)
+        #expect(stored.inputBudgetTokens == 40000)
+        #expect(stored.effectiveBudgetTokens == 36000)
 
         let fallback = settings.window(for: "anthropic/claude-opus-5")
         #expect(fallback.model == "anthropic/claude-opus-5")
@@ -296,7 +296,7 @@ struct SateSettingsTests {
     func contextWindowSparseDecode() throws {
         let window = try JSONDecoder().decode(ContextWindow.self, from: Data(#"{"model":"m"}"#.utf8))
         #expect(window.inputBudgetTokens == 100_000)
-        #expect(window.reserveForOutputTokens == 8_000)
+        #expect(window.reserveForOutputTokens == 8000)
     }
 
     @Test("InMemorySecretStore stores and clears the token")

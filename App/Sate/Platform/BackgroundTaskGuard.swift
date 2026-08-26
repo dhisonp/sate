@@ -1,6 +1,6 @@
 import Foundation
 #if canImport(UIKit)
-import UIKit
+    import UIKit
 #endif
 
 /// Keeps a generation alive for a bounded window after the app is backgrounded,
@@ -20,28 +20,30 @@ final class BackgroundTaskGuard {
     private var expirationHandler: (@MainActor () -> Void)?
     private var timeout: Task<Void, Never>?
     #if canImport(UIKit)
-    private var identifier: UIBackgroundTaskIdentifier = .invalid
+        private var identifier: UIBackgroundTaskIdentifier = .invalid
     #endif
 
     init() {}
 
-    var isActive: Bool { timeout != nil }
+    var isActive: Bool {
+        timeout != nil
+    }
 
     func begin(name: String = "sate.generation", onExpire: @escaping @MainActor () -> Void) {
         guard timeout == nil else { return }
         expirationHandler = onExpire
 
         #if canImport(UIKit)
-        identifier = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
-            // Documented to run on the main thread, and it must act immediately:
-            // hopping through a Task risks suspension before it ever runs.
-            MainActor.assumeIsolated { self?.expire() }
-        }
-        guard identifier != .invalid else {
-            // Background execution was refused outright; do not pretend to have time.
-            expire()
-            return
-        }
+            identifier = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+                // Documented to run on the main thread, and it must act immediately:
+                // hopping through a Task risks suspension before it ever runs.
+                MainActor.assumeIsolated { self?.expire() }
+            }
+            guard identifier != .invalid else {
+                // Background execution was refused outright; do not pretend to have time.
+                expire()
+                return
+            }
         #endif
 
         timeout = Task { [weak self] in
@@ -62,9 +64,9 @@ final class BackgroundTaskGuard {
         timeout = nil
         expirationHandler = nil
         #if canImport(UIKit)
-        guard identifier != .invalid else { return }
-        UIApplication.shared.endBackgroundTask(identifier)
-        identifier = .invalid
+            guard identifier != .invalid else { return }
+            UIApplication.shared.endBackgroundTask(identifier)
+            identifier = .invalid
         #endif
     }
 

@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 @testable import SateCore
+import Testing
 
 /// A hand-advanced clock: cadence must be provable without sleeping.
 private final class TestClock: CoalescerClock, @unchecked Sendable {
@@ -174,11 +174,15 @@ struct DeltaCoalescerDrainTests {
 
         // 300 deltas/second for one second, three characters each.
         var flushes = 0
-        for _ in 0..<300 {
-            if coalescer.append(text: "abc") != nil { flushes += 1 }
+        for _ in 0 ..< 300 {
+            if coalescer.append(text: "abc") != nil {
+                flushes += 1
+            }
             clock.advance(1.0 / 300.0)
         }
-        if coalescer.drain() != nil { flushes += 1 }
+        if coalescer.drain() != nil {
+            flushes += 1
+        }
 
         #expect(flushes <= 64, "expected roughly one flush per frame, got \(flushes)")
         #expect(flushes >= 2)
@@ -190,13 +194,17 @@ struct DeltaCoalescerDrainTests {
 
         var expected = ""
         var received = ""
-        for index in 0..<500 {
+        for index in 0 ..< 500 {
             let delta = "token\(index) "
             expected += delta
-            if let flush = coalescer.append(text: delta) { received += flush.text }
+            if let flush = coalescer.append(text: delta) {
+                received += flush.text
+            }
             clock.advance(0.003)
         }
-        if let tail = coalescer.drain() { received += tail.text }
+        if let tail = coalescer.drain() {
+            received += tail.text
+        }
 
         #expect(received == expected)
     }

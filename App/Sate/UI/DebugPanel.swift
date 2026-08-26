@@ -43,7 +43,9 @@ struct DebugPanel: View {
     private struct Row: Identifiable {
         let label: String
         let value: String
-        var id: String { label }
+        var id: String {
+            label
+        }
     }
 
     private var rows: [Row] {
@@ -59,7 +61,7 @@ struct DebugPanel: View {
             Row(label: "ttfb", value: format(trace.timeToFirstByte)),
             Row(label: "duration", value: format(trace.duration)),
             Row(label: "bytes", value: "\(trace.bytesReceived)"),
-            Row(label: "retried", value: trace.retried ? "yes" : "no")
+            Row(label: "retried", value: trace.retried ? "yes" : "no"),
         ]
         if (trace.step ?? 0) > 0 {
             rows.append(Row(label: "note", value: "served by fallback"))

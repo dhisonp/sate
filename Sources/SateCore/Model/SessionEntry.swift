@@ -57,18 +57,20 @@ extension SessionEntry: Codable {
         let type = try container.decodeIfPresent(String.self, forKey: .type) ?? ""
         switch type {
         case "header":
-            self = .header(try container.decode(ConversationHeader.self, forKey: .header))
+            self = try .header(container.decode(ConversationHeader.self, forKey: .header))
         case "message":
-            self = .message(try container.decode(Message.self, forKey: .message))
+            self = try .message(container.decode(Message.self, forKey: .message))
         case "leaf":
-            self = .leaf(
-                id: try container.decode(UUID.self, forKey: .id),
-                timestamp: try container.decodeIfPresent(Date.self, forKey: .timestamp) ?? Date())
+            self = try .leaf(
+                id: container.decode(UUID.self, forKey: .id),
+                timestamp: container.decodeIfPresent(Date.self, forKey: .timestamp) ?? Date()
+            )
         case "update":
-            self = .update(
-                title: try container.decodeIfPresent(String.self, forKey: .title),
-                model: try container.decodeIfPresent(String.self, forKey: .model),
-                timestamp: try container.decodeIfPresent(Date.self, forKey: .timestamp) ?? Date())
+            self = try .update(
+                title: container.decodeIfPresent(String.self, forKey: .title),
+                model: container.decodeIfPresent(String.self, forKey: .model),
+                timestamp: container.decodeIfPresent(Date.self, forKey: .timestamp) ?? Date()
+            )
         default:
             self = .unknown(type: type, raw: "")
         }
@@ -77,22 +79,22 @@ extension SessionEntry: Codable {
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .header(let header):
+        case let .header(header):
             try container.encode("header", forKey: .type)
             try container.encode(header, forKey: .header)
-        case .message(let message):
+        case let .message(message):
             try container.encode("message", forKey: .type)
             try container.encode(message, forKey: .message)
-        case .leaf(let id, let timestamp):
+        case let .leaf(id, timestamp):
             try container.encode("leaf", forKey: .type)
             try container.encode(id, forKey: .id)
             try container.encode(timestamp, forKey: .timestamp)
-        case .update(let title, let model, let timestamp):
+        case let .update(title, model, timestamp):
             try container.encode("update", forKey: .type)
             try container.encodeIfPresent(title, forKey: .title)
             try container.encodeIfPresent(model, forKey: .model)
             try container.encode(timestamp, forKey: .timestamp)
-        case .unknown(let type, _):
+        case let .unknown(type, _):
             try container.encode(type, forKey: .type)
         }
     }

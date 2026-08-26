@@ -45,7 +45,9 @@ public struct SSEParser: Sendable {
             if !bomResolved {
                 if byte == Self.bom[bomMatched] {
                     bomMatched += 1
-                    if bomMatched == Self.bom.count { bomResolved = true }
+                    if bomMatched == Self.bom.count {
+                        bomResolved = true
+                    }
                     continue
                 }
                 // The prefix matched but the sequence is not a BOM, so the bytes
@@ -53,7 +55,9 @@ public struct SSEParser: Sendable {
                 let replay = Self.bom.prefix(bomMatched)
                 bomMatched = 0
                 bomResolved = true
-                for withheld in replay { try feed(withheld, into: &events) }
+                for withheld in replay {
+                    try feed(withheld, into: &events)
+                }
             }
             try feed(byte, into: &events)
         }
@@ -77,7 +81,9 @@ public struct SSEParser: Sendable {
     private mutating func feed(_ byte: UInt8, into events: inout [SSEEvent]) throws {
         if pendingLF {
             pendingLF = false
-            if byte == 0x0A { return }
+            if byte == 0x0A {
+                return
+            }
         }
 
         eventBytes += 1
@@ -104,7 +110,9 @@ public struct SSEParser: Sendable {
             return
         }
         // Keepalive comment.
-        if lineBytes[0] == 0x3A { return }
+        if lineBytes[0] == 0x3A {
+            return
+        }
 
         // Split on bytes, not Characters: the spec's colon and single space are
         // defined on the byte stream, and `String.first` would see a leading

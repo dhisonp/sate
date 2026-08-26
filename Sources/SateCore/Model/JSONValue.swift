@@ -27,7 +27,8 @@ public enum JSONValue: Codable, Hashable, Sendable {
             self = .object(value)
         } else {
             throw DecodingError.dataCorruptedError(
-                in: container, debugDescription: "Unrecognized JSON value")
+                in: container, debugDescription: "Unrecognized JSON value"
+            )
         }
     }
 
@@ -35,31 +36,39 @@ public enum JSONValue: Codable, Hashable, Sendable {
         var container = encoder.singleValueContainer()
         switch self {
         case .null: try container.encodeNil()
-        case .bool(let value): try container.encode(value)
-        case .number(let value): try container.encode(value)
-        case .string(let value): try container.encode(value)
-        case .array(let value): try container.encode(value)
-        case .object(let value): try container.encode(value)
+        case let .bool(value): try container.encode(value)
+        case let .number(value): try container.encode(value)
+        case let .string(value): try container.encode(value)
+        case let .array(value): try container.encode(value)
+        case let .object(value): try container.encode(value)
         }
     }
 
     public var stringValue: String? {
-        if case .string(let value) = self { return value }
+        if case let .string(value) = self {
+            return value
+        }
         return nil
     }
 
     public var doubleValue: Double? {
-        if case .number(let value) = self { return value }
+        if case let .number(value) = self {
+            return value
+        }
         return nil
     }
 
     public var objectValue: [String: JSONValue]? {
-        if case .object(let value) = self { return value }
+        if case let .object(value) = self {
+            return value
+        }
         return nil
     }
 
     public var arrayValue: [JSONValue]? {
-        if case .array(let value) = self { return value }
+        if case let .array(value) = self {
+            return value
+        }
         return nil
     }
 
@@ -70,7 +79,9 @@ public enum JSONValue: Codable, Hashable, Sendable {
     /// one, losing everything since the last checkpoint, so an out-of-range value
     /// is "no integer here" instead.
     public var intValue: Int? {
-        if case .number(let value) = self { return Int(exactly: value.rounded()) }
+        if case let .number(value) = self {
+            return Int(exactly: value.rounded())
+        }
         return nil
     }
 }

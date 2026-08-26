@@ -16,7 +16,8 @@ Zero third-party packages. Swift Testing (`@Test`/`#expect`), not XCTest.
 
 ```
 ./scripts/test.sh                     # swift test — SateCore on macOS, no simulator
-swift test --filter SSEParser         # one suite
+./scripts/lint.sh                     # swiftlint
+./scripts/format.sh                   # swiftformat
 ./scripts/build.sh                    # xcodebuild the iOS app
 ./scripts/e2e.sh                      # boot sim, install, drive via SATE_DEMO, screenshot
 ./scripts/capture-fixtures.sh <model> # operator-run; needs SATE_CF_ACCOUNT + SATE_CF_TOKEN

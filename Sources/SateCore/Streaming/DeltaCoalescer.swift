@@ -8,7 +8,9 @@ public protocol CoalescerClock: Sendable {
 
 public struct SystemCoalescerClock: CoalescerClock, Sendable {
     public init() {}
-    public var now: Date { Date() }
+    public var now: Date {
+        Date()
+    }
 }
 
 /// Accumulates text/reasoning deltas on the producer side and reports when a
@@ -24,7 +26,9 @@ public struct DeltaCoalescer: Sendable {
             self.reasoning = reasoning
         }
 
-        public var isEmpty: Bool { text.isEmpty && reasoning.isEmpty }
+        public var isEmpty: Bool {
+            text.isEmpty && reasoning.isEmpty
+        }
     }
 
     private let minInterval: TimeInterval
@@ -61,8 +65,12 @@ public struct DeltaCoalescer: Sendable {
             // The very first token defines perceived latency, so it is never held.
             return flush(at: now)
         }
-        if pendingCharacters >= maxPendingCharacters { return flush(at: now) }
-        if now.timeIntervalSince(lastFlush) >= minInterval { return flush(at: now) }
+        if pendingCharacters >= maxPendingCharacters {
+            return flush(at: now)
+        }
+        if now.timeIntervalSince(lastFlush) >= minInterval {
+            return flush(at: now)
+        }
         return nil
     }
 
@@ -73,7 +81,9 @@ public struct DeltaCoalescer: Sendable {
         return flush(at: clock.now)
     }
 
-    public var hasPending: Bool { !pendingText.isEmpty || !pendingReasoning.isEmpty }
+    public var hasPending: Bool {
+        !pendingText.isEmpty || !pendingReasoning.isEmpty
+    }
 
     private mutating func flush(at instant: Date) -> Flush {
         let flush = Flush(text: pendingText, reasoning: pendingReasoning)

@@ -64,10 +64,6 @@ struct StreamingMessageView: View {
 private struct FrozenParagraph: View, Equatable {
     let text: String
 
-    nonisolated static func == (lhs: FrozenParagraph, rhs: FrozenParagraph) -> Bool {
-        lhs.text == rhs.text
-    }
-
     var body: some View {
         Text(text)
             .fixedSize(horizontal: false, vertical: true)

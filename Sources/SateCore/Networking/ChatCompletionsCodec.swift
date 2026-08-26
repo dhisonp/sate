@@ -69,7 +69,7 @@ public struct ChatCompletionsCodec: Sendable {
 
     public func encodeBody(_ request: ChatCompletionRequest, stream: Bool) throws -> Data {
         var body: [String: JSONValue] = [
-            "max_tokens": .number(Double(request.maxTokens ?? Self.defaultMaxTokens))
+            "max_tokens": .number(Double(request.maxTokens ?? Self.defaultMaxTokens)),
         ]
         if let temperature = request.temperature {
             body["temperature"] = .number(temperature)
@@ -83,7 +83,9 @@ public struct ChatCompletionsCodec: Sendable {
             // worst-case bill (a client-side cancel does not reliably abort the
             // upstream generation). A nonsensical override is dropped so the
             // configured ceiling above survives.
-            if key == "max_tokens", !Self.isUsableTokenLimit(value) { continue }
+            if key == "max_tokens", !Self.isUsableTokenLimit(value) {
+                continue
+            }
             body[key] = value
         }
         body["model"] = .string(request.model)
@@ -117,7 +119,9 @@ public struct ChatCompletionsCodec: Sendable {
             // several backends 400, and it inflates the prompt for no benefit.
             // An empty assistant turn (cancelled before the first token) is also a
             // 400 on several backends, so it is dropped rather than sent blank.
-            if message.role == .assistant, text.isEmpty { continue }
+            if message.role == .assistant, text.isEmpty {
+                continue
+            }
             out.append(.object(["role": .string(message.role.rawValue), "content": .string(text)]))
         }
         return out
@@ -129,18 +133,18 @@ public struct ChatCompletionsCodec: Sendable {
         switch value {
         case .null:
             return NSNull()
-        case .bool(let flag):
+        case let .bool(flag):
             return flag
-        case .number(let number):
+        case let .number(number):
             if number.rounded() == number, number.magnitude < 9.007199254740992e15 {
                 return Int(number)
             }
             return number
-        case .string(let string):
+        case let .string(string):
             return string
-        case .array(let values):
+        case let .array(values):
             return values.map(foundationObject)
-        case .object(let values):
+        case let .object(values):
             return values.mapValues(foundationObject)
         }
     }
@@ -173,7 +177,9 @@ public struct ChatCompletionsCodec: Sendable {
         dataPayload: String
     ) throws -> (events: [StreamEvent], termination: ChunkTermination) {
         let trimmed = dataPayload.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty || trimmed == "[DONE]" { return ([], ChunkTermination()) }
+        if trimmed.isEmpty || trimmed == "[DONE]" {
+            return ([], ChunkTermination())
+        }
         let root = try Self.object(from: Data(trimmed.utf8), context: "stream chunk")
         try Self.throwIfError(root)
 
@@ -265,9 +271,9 @@ public struct ChatCompletionsCodec: Sendable {
     /// some non-streamed replies.
     private static func text(fromContent value: JSONValue?) -> String? {
         switch value {
-        case .string(let text):
+        case let .string(text):
             return text
-        case .array(let parts):
+        case let .array(parts):
             return parts.compactMap { fields($0)?["text"]?.stringValue }.joined()
         default:
             return nil
@@ -286,7 +292,8 @@ public struct ChatCompletionsCodec: Sendable {
                 index: index,
                 id: call["id"]?.stringValue,
                 name: function?["name"]?.stringValue,
-                argumentsFragment: function?["arguments"]?.stringValue ?? "")
+                argumentsFragment: function?["arguments"]?.stringValue ?? ""
+            )
         }
     }
 
@@ -298,12 +305,15 @@ public struct ChatCompletionsCodec: Sendable {
         return Usage(promptTokens: prompt, completionTokens: completion, totalTokens: total)
     }
 
+    /// Optional-friendly aliases: every call site here starts from a `JSONValue?`
+    /// dictionary lookup, so these keep the mining code one line per hop.
+    private static func fields(_ value: JSONValue?) -> [String: JSONValue]? {
+        value?.objectValue
+    }
 
-    // Optional-friendly aliases: every call site here starts from a `JSONValue?`
-    // dictionary lookup, so these keep the mining code one line per hop.
-    private static func fields(_ value: JSONValue?) -> [String: JSONValue]? { value?.objectValue }
-
-    private static func list(_ value: JSONValue?) -> [JSONValue]? { value?.arrayValue }
+    private static func list(_ value: JSONValue?) -> [JSONValue]? {
+        value?.arrayValue
+    }
 
     private static func object(from data: Data, context: String) throws -> [String: JSONValue] {
         guard let value = try? JSONDecoder().decode(JSONValue.self, from: data),
@@ -319,7 +329,7 @@ public struct ChatCompletionsCodec: Sendable {
     private static func throwIfError(_ root: [String: JSONValue]) throws {
         guard let error = root["error"] else { return }
         switch error {
-        case .object(let fields):
+        case let .object(fields):
             let message = fields["message"]?.stringValue
                 ?? fields["detail"]?.stringValue
                 ?? "The provider reported an error."
@@ -327,7 +337,7 @@ public struct ChatCompletionsCodec: Sendable {
                 ?? fields["code"]?.intValue.map(String.init)
                 ?? fields["type"]?.stringValue
             throw GatewayError.inStreamError(code: code, message: message)
-        case .string(let message):
+        case let .string(message):
             throw GatewayError.inStreamError(code: nil, message: message)
         case .null:
             return

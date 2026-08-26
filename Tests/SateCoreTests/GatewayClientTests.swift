@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import SateCore
+import Testing
 
 // MARK: - URLProtocol stub
 
@@ -67,6 +66,7 @@ final class StopFlag: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         return stopped
     }
+
     func stop() {
         lock.lock(); defer { lock.unlock() }
         stopped = true
@@ -77,8 +77,13 @@ final class StubURLProtocol: URLProtocol {
     static let box = StubBox()
     private let flag = StopFlag()
 
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override class func canInit(with _: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
 
     override func startLoading() {
         let stub = Self.box.respond(to: request)
@@ -90,19 +95,26 @@ final class StubURLProtocol: URLProtocol {
         }
         // Return without ever calling the client back: the task simply hangs, as
         // it does when URLSession is waiting for connectivity that never arrives.
-        if stub.stall { return }
+        if stub.stall {
+            return
+        }
         let response = HTTPURLResponse(
             url: request.url!, statusCode: stub.status, httpVersion: "HTTP/1.1",
-            headerFields: stub.headers)!
+            headerFields: stub.headers
+        )!
         client.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
 
         for chunk in stub.chunks {
-            if flag.isStopped { return }
+            if flag.isStopped {
+                return
+            }
             client.urlProtocol(self, didLoad: chunk)
             // Keeps chunks from coalescing in the loading system.
             Thread.sleep(forTimeInterval: 0.005)
         }
-        if stub.hang || flag.isStopped { return }
+        if stub.hang || flag.isStopped {
+            return
+        }
         client.urlProtocolDidFinishLoading(self)
     }
 
@@ -122,7 +134,8 @@ struct GatewayClientTests {
         token: "secret-token",
         // Keeps the single client-side retry from adding a second to the suite.
         retryDelayMilliseconds: 10,
-        metadata: ["build": "42"])
+        metadata: ["build": "42"]
+    )
 
     private func makeClient(
         _ configuration: GatewayConfiguration = GatewayClientTests.configuration,
@@ -132,7 +145,8 @@ struct GatewayClientTests {
         let sessionConfiguration = URLSessionConfiguration.ephemeral
         sessionConfiguration.protocolClasses = [StubURLProtocol.self]
         return GatewayClient(
-            configuration: configuration, session: URLSession(configuration: sessionConfiguration))
+            configuration: configuration, session: URLSession(configuration: sessionConfiguration)
+        )
     }
 
     private func collect(
@@ -140,7 +154,9 @@ struct GatewayClientTests {
     ) async -> (events: [StreamEvent], error: (any Error)?) {
         var events: [StreamEvent] = []
         do {
-            for try await event in stream { events.append(event) }
+            for try await event in stream {
+                events.append(event)
+            }
         } catch {
             return (events, error)
         }
@@ -152,7 +168,8 @@ struct GatewayClientTests {
     }
 
     private static let request = ChatCompletionRequest(
-        model: "openai/gpt-5.2", messages: [.user("hello")], maxTokens: 256)
+        model: "openai/gpt-5.2", messages: [.user("hello")], maxTokens: 256
+    )
 
     // MARK: - Status mapping
 
@@ -204,7 +221,7 @@ struct GatewayClientTests {
         let client = makeClient { _ in .body(html, status: 524, contentType: "text/html") }
         let (_, error) = await collect(client.stream(Self.request))
         let mapped = try gatewayError(error)
-        guard case .upstreamTimeout(let status, let message) = mapped else {
+        guard case let .upstreamTimeout(status, message) = mapped else {
             Issue.record("expected upstreamTimeout, got \(mapped)")
             return
         }
@@ -232,7 +249,7 @@ struct GatewayClientTests {
     // MARK: - Streaming
 
     @Test("A chunked SSE stream decodes to ordered events ending in finished(.stop, usage)")
-    func happyPath() async throws {
+    func happyPath() async {
         let client = makeClient { _ in
             .sse([
                 "data: {\"id\":\"resp_1\",\"model\":\"openai/gpt-5.2\",\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n",
@@ -251,7 +268,8 @@ struct GatewayClientTests {
             .textDelta(" world"),
             .finished(
                 reason: .stop,
-                usage: Usage(promptTokens: 9, completionTokens: 2, totalTokens: 11)),
+                usage: Usage(promptTokens: 9, completionTokens: 2, totalTokens: 11)
+            ),
         ])
         let trace = await client.lastTrace
         #expect(trace?.statusCode == 200)
@@ -267,7 +285,9 @@ struct GatewayClientTests {
 
     private func finished(_ events: [StreamEvent]) throws -> (FinishReason, Usage?) {
         let terminal = events.compactMap { event -> (FinishReason, Usage?)? in
-            if case .finished(let reason, let usage) = event { return (reason, usage) }
+            if case let .finished(reason, usage) = event {
+                return (reason, usage)
+            }
             return nil
         }
         #expect(terminal.count == 1, "exactly one terminal event must reach the caller")
@@ -328,7 +348,13 @@ struct GatewayClientTests {
         }
         let (events, error) = await collect(client.stream(Self.request))
         #expect(error == nil)
-        #expect(events.filter { if case .textDelta = $0 { return true } else { return false } }.count == 2)
+        #expect(events.filter {
+            if case .textDelta = $0 {
+                return true
+            } else {
+                return false
+            }
+        }.count == 2)
         let (reason, usage) = try finished(events)
         #expect(reason == .length)
         // Last usage wins: a cumulative count grows chunk by chunk.
@@ -347,7 +373,8 @@ struct GatewayClientTests {
                     "cf-aig-cache-status": "MISS",
                     "cf-aig-step": "1",
                 ],
-                chunks: [Data("data: {\"choices\":[{\"delta\":{\"content\":\"x\"},\"finish_reason\":\"stop\"}]}\n\n".utf8)])
+                chunks: [Data("data: {\"choices\":[{\"delta\":{\"content\":\"x\"},\"finish_reason\":\"stop\"}]}\n\n".utf8)]
+            )
         }
         _ = await collect(client.stream(Self.request))
         let trace = try #require(await client.lastTrace)
@@ -358,10 +385,10 @@ struct GatewayClientTests {
     }
 
     @Test("A stream that ends without finish_reason finishes as truncated")
-    func truncatedStream() async throws {
+    func truncatedStream() async {
         let client = makeClient { _ in
             .sse([
-                "data: {\"id\":\"r\",\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"
+                "data: {\"id\":\"r\",\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
             ])
         }
         let (events, error) = await collect(client.stream(Self.request))
@@ -374,7 +401,7 @@ struct GatewayClientTests {
     }
 
     @Test("A 2xx application/json body degrades to one textDelta plus finished")
-    func nonStreamingJSONResponse() async throws {
+    func nonStreamingJSONResponse() async {
         let client = makeClient { _ in
             .body(#"""
             {"id":"cmpl_1","model":"openai/gpt-5.2","choices":[{"message":{"role":"assistant","content":"Hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}
@@ -386,7 +413,8 @@ struct GatewayClientTests {
             .started(responseID: "cmpl_1", model: "openai/gpt-5.2"),
             .textDelta("Hi"),
             .finished(
-                reason: .stop, usage: Usage(promptTokens: 3, completionTokens: 1, totalTokens: 4)),
+                reason: .stop, usage: Usage(promptTokens: 3, completionTokens: 1, totalTokens: 4)
+            ),
         ])
     }
 
@@ -444,7 +472,8 @@ struct GatewayClientTests {
             accountID: "acct-1",
             token: "secret-token",
             retryDelayMilliseconds: 10,
-            connectivityTimeout: 0.15)
+            connectivityTimeout: 0.15
+        )
         let client = makeClient(configuration) { _ in StubResponse(stall: true) }
 
         let started = Date()
@@ -459,17 +488,20 @@ struct GatewayClientTests {
     }
 
     @Test("Cancelling the consuming task tears the request down promptly")
-    func cancellationStopsTheRequest() async throws {
+    func cancellationStopsTheRequest() async {
         let client = makeClient { _ in
             StubResponse(
                 chunks: [Data("data: {\"id\":\"r\",\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n".utf8)],
-                hang: true)
+                hang: true
+            )
         }
         let started = Date()
         let work = Task {
             var deltas = 0
             for try await event in client.stream(Self.request) {
-                if case .textDelta = event { deltas += 1 }
+                if case .textDelta = event {
+                    deltas += 1
+                }
             }
             return deltas
         }
@@ -540,7 +572,8 @@ struct GatewayClientTests {
             accountID: "acct-1",
             token: "secret-token",
             collectLogPayload: false,
-            metadata: ["build": "42", "device": "hashed", "a": "1", "b": "2", "c": "3", "d": "4"])
+            metadata: ["build": "42", "device": "hashed", "a": "1", "b": "2", "c": "3", "d": "4"]
+        )
         let client = makeClient(configuration) { _ in .sse(["data: [DONE]\n\n"]) }
         let conversation = UUID()
         _ = await collect(client.stream(Self.request, conversationID: conversation))
@@ -552,7 +585,8 @@ struct GatewayClientTests {
 
         let raw = try #require(headers["cf-aig-metadata"])
         let decoded = try #require(
-            try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: String])
+            try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: String]
+        )
         #expect(decoded.count == 5)
         #expect(decoded["app"] == "sate")
         #expect(decoded["conversation"] == conversation.uuidString)
@@ -582,7 +616,9 @@ struct GatewayClientTests {
         var buffer = [UInt8](repeating: 0, count: 4096)
         while stream.hasBytesAvailable {
             let read = stream.read(&buffer, maxLength: buffer.count)
-            if read <= 0 { break }
+            if read <= 0 {
+                break
+            }
             data.append(contentsOf: buffer[..<read])
         }
         return data

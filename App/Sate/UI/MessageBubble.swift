@@ -98,12 +98,14 @@ struct MessageBubble: View, Equatable {
                     SiblingNavigator(
                         siblings: siblings,
                         current: message.id,
-                        onSwitch: onSwitchBranch)
+                        onSwitch: onSwitchBranch
+                    )
                 }
             }
             .frame(
                 maxWidth: .infinity,
-                alignment: message.role == .user ? .trailing : .leading)
+                alignment: message.role == .user ? .trailing : .leading
+            )
         }
     }
 
@@ -111,13 +113,15 @@ struct MessageBubble: View, Equatable {
     /// `.inflight` sidecar after a crash shows the same tag as a live cancel.
     private var statusTags: [String] {
         var tags: [String] = []
-        if message.interrupted { tags.append("Interrupted") }
+        if message.interrupted {
+            tags.append("Interrupted")
+        }
         switch message.finishReason {
         case .length: tags.append("Hit max length")
         case .contentFilter: tags.append("Filtered by provider")
         case .truncated: tags.append("May be incomplete")
         case .toolCalls: tags.append("Tool call")
-        case .unknown(let raw): tags.append(raw)
+        case let .unknown(raw): tags.append(raw)
         case .stop, .none: break
         }
         return tags
@@ -135,7 +139,9 @@ private struct SiblingNavigator: View {
         let index = siblings.firstIndex(of: current) ?? 0
         HStack(spacing: 6) {
             Button {
-                if index > 0 { onSwitch(siblings[index - 1]) }
+                if index > 0 {
+                    onSwitch(siblings[index - 1])
+                }
             } label: {
                 Image(systemName: "chevron.left")
             }
@@ -147,7 +153,9 @@ private struct SiblingNavigator: View {
                 .foregroundStyle(.secondary)
 
             Button {
-                if index + 1 < siblings.count { onSwitch(siblings[index + 1]) }
+                if index + 1 < siblings.count {
+                    onSwitch(siblings[index + 1])
+                }
             } label: {
                 Image(systemName: "chevron.right")
             }

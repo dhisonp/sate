@@ -35,17 +35,19 @@ public enum FinishReason: Hashable, Sendable {
         case .toolCalls: return "tool_calls"
         case .contentFilter: return "content_filter"
         case .truncated: return "truncated"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 
     /// Only `.stop` is a clean completion; everything else marks the message.
-    public var isClean: Bool { self == .stop }
+    public var isClean: Bool {
+        self == .stop
+    }
 }
 
 extension FinishReason: Codable {
     public init(from decoder: any Decoder) throws {
-        self.init(rawValue: try decoder.singleValueContainer().decode(String.self))
+        try self.init(rawValue: decoder.singleValueContainer().decode(String.self))
     }
 
     public func encode(to encoder: any Encoder) throws {

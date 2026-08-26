@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import SateCore
+import Testing
 
 @Suite("SystemPrompt")
 struct SystemPromptTests {
@@ -10,10 +9,11 @@ struct SystemPromptTests {
 
     @Test("The date token is replaced with the supplied day")
     func substitutesDate() {
-        let date = Date(timeIntervalSince1970: 1_774_483_200)  // 2026-03-25 UTC
+        let date = Date(timeIntervalSince1970: 1_774_483_200) // 2026-03-25 UTC
         let resolved = SystemPrompt.resolve(
             "Today is \(SystemPrompt.currentDateToken).",
-            date: date, locale: english, timeZone: utc)
+            date: date, locale: english, timeZone: utc
+        )
 
         #expect(!resolved.contains(SystemPrompt.currentDateToken))
         #expect(resolved.contains("2026"))
@@ -40,7 +40,8 @@ struct SystemPromptTests {
         let resolved = SystemPrompt.resolve(
             SystemPrompt.researchAssistant,
             date: Date(timeIntervalSince1970: 1_774_483_200),
-            locale: english, timeZone: utc)
+            locale: english, timeZone: utc
+        )
         #expect(!resolved.contains(SystemPrompt.currentDateToken))
         #expect(!resolved.contains("{{"))
     }

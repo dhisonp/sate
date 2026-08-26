@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import SateCore
+import Testing
 
 @Suite("ChatCompletionsCodec")
 struct ChatCompletionsCodecTests {
@@ -12,7 +11,8 @@ struct ChatCompletionsCodecTests {
     ) throws -> [String: Any] {
         let data = try codec.encodeBody(request, stream: stream)
         return try #require(
-            try JSONSerialization.jsonObject(with: data) as? [String: Any])
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
     }
 
     // MARK: - Encoding
@@ -22,7 +22,8 @@ struct ChatCompletionsCodecTests {
         let request = ChatCompletionRequest(
             model: "openai/gpt-5.2",
             messages: [.user("hello")],
-            systemPrompt: "Be terse.")
+            systemPrompt: "Be terse."
+        )
         let body = try encodedBody(request)
         let messages = try #require(body["messages"] as? [[String: String]])
         #expect(messages.count == 2)
@@ -33,14 +34,17 @@ struct ChatCompletionsCodecTests {
     @Test("Reasoning is never replayed to the model")
     func reasoningIsNotReplayed() throws {
         let assistant = Message(
-            role: .assistant, content: [.text("42")], reasoning: "long chain of thought")
+            role: .assistant, content: [.text("42")], reasoning: "long chain of thought"
+        )
         let body = try encodedBody(
-            ChatCompletionRequest(model: "m", messages: [.user("q"), assistant]))
+            ChatCompletionRequest(model: "m", messages: [.user("q"), assistant])
+        )
         let messages = try #require(body["messages"] as? [[String: String]])
         #expect(messages.count == 2)
         #expect(messages[1] == ["role": "assistant", "content": "42"])
-        let raw = String(decoding: try codec.encodeBody(
-            ChatCompletionRequest(model: "m", messages: [assistant]), stream: true), as: UTF8.self)
+        let raw = try String(decoding: codec.encodeBody(
+            ChatCompletionRequest(model: "m", messages: [assistant]), stream: true
+        ), as: UTF8.self)
         #expect(!raw.contains("reasoning"))
         #expect(!raw.contains("long chain of thought"))
     }
@@ -53,7 +57,8 @@ struct ChatCompletionsCodecTests {
                 .user("hi"),
                 Message(role: .assistant, content: [.text("")]),
                 .user(""),
-            ])
+            ]
+        )
         let messages = try #require(try encodedBody(request)["messages"] as? [[String: String]])
         #expect(messages == [
             ["role": "user", "content": "hi"],
@@ -65,9 +70,11 @@ struct ChatCompletionsCodecTests {
     func maxTokensAlwaysSent() throws {
         let body = try encodedBody(ChatCompletionRequest(model: "m", maxTokens: nil))
         #expect(body["max_tokens"] as? Int == ChatCompletionsCodec.defaultMaxTokens)
-        let raw = String(
-            decoding: try codec.encodeBody(
-                ChatCompletionRequest(model: "m", maxTokens: 100), stream: true), as: UTF8.self)
+        let raw = try String(
+            decoding: codec.encodeBody(
+                ChatCompletionRequest(model: "m", maxTokens: 100), stream: true
+            ), as: UTF8.self
+        )
         #expect(raw.contains("\"max_tokens\":100"))
     }
 
@@ -75,14 +82,16 @@ struct ChatCompletionsCodecTests {
     func maxTokensOverride() throws {
         // A legitimate per-provider tune wins.
         let tuned = try encodedBody(
-            ChatCompletionRequest(model: "m", maxTokens: 256, extra: ["max_tokens": .number(9000)]))
+            ChatCompletionRequest(model: "m", maxTokens: 256, extra: ["max_tokens": .number(9000)])
+        )
         #expect(tuned["max_tokens"] as? Int == 9000)
 
         // Anything that would leave the request UNBOUNDED is ignored: `max_tokens`
         // is the only hard ceiling on a runaway generation's bill.
         for useless: JSONValue in [.null, .number(0), .number(-1), .string("lots")] {
             let body = try encodedBody(
-                ChatCompletionRequest(model: "m", maxTokens: 256, extra: ["max_tokens": useless]))
+                ChatCompletionRequest(model: "m", maxTokens: 256, extra: ["max_tokens": useless])
+            )
             #expect(body["max_tokens"] as? Int == 256, "\(useless) must not remove the bound")
         }
     }
@@ -97,7 +106,8 @@ struct ChatCompletionsCodecTests {
         #expect(off["stream_options"] == nil)
 
         let nonStreaming = try encodedBody(
-            ChatCompletionRequest(model: "m", includeUsage: true), stream: false)
+            ChatCompletionRequest(model: "m", includeUsage: true), stream: false
+        )
         #expect(nonStreaming["stream_options"] == nil)
         #expect(nonStreaming["stream"] as? Bool == false)
     }
@@ -114,7 +124,8 @@ struct ChatCompletionsCodecTests {
                 "stream": .bool(false),
                 "top_p": .number(0.5),
                 "provider": .object(["order": .array([.string("a")])]),
-            ])
+            ]
+        )
         let body = try encodedBody(request)
         #expect(body["model"] as? String == "openai/gpt-5.2")
         #expect(body["stream"] as? Bool == true)
@@ -129,7 +140,8 @@ struct ChatCompletionsCodecTests {
     @Test("content delta becomes a textDelta")
     func textDelta() throws {
         let events = try codec.decode(
-            dataPayload: #"{"choices":[{"delta":{"content":"Hel"}}]}"#)
+            dataPayload: #"{"choices":[{"delta":{"content":"Hel"}}]}"#
+        )
         #expect(events == [.textDelta("Hel")])
     }
 
@@ -137,16 +149,19 @@ struct ChatCompletionsCodecTests {
     func reasoningDelta() throws {
         #expect(
             try codec.decode(dataPayload: #"{"choices":[{"delta":{"reasoning_content":"think"}}]}"#)
-                == [.reasoningDelta("think")])
+                == [.reasoningDelta("think")]
+        )
         #expect(
             try codec.decode(dataPayload: #"{"choices":[{"delta":{"reasoning":"think"}}]}"#)
-                == [.reasoningDelta("think")])
+                == [.reasoningDelta("think")]
+        )
     }
 
     @Test("First chunk with id/model yields started")
     func startedEvent() throws {
         let events = try codec.decode(
-            dataPayload: #"{"id":"resp_1","model":"openai/gpt-5.2","choices":[{"delta":{"role":"assistant"}}]}"#)
+            dataPayload: #"{"id":"resp_1","model":"openai/gpt-5.2","choices":[{"delta":{"role":"assistant"}}]}"#
+        )
         #expect(events == [.started(responseID: "resp_1", model: "openai/gpt-5.2")])
     }
 
@@ -163,24 +178,27 @@ struct ChatCompletionsCodecTests {
         let first = try codec.decode(
             dataPayload: #"""
             {"choices":[{"delta":{"tool_calls":[{"index":2,"id":"call_a","type":"function","function":{"name":"search","arguments":""}}]}}]}
-            """#)
+            """#
+        )
         #expect(first == [
-            .toolCallDelta(index: 2, id: "call_a", name: "search", argumentsFragment: "")
+            .toolCallDelta(index: 2, id: "call_a", name: "search", argumentsFragment: ""),
         ])
 
         // Second chunk carries only the continuation: no id, no name, index 2 even
         // though it is the sole element of the array.
         let second = try codec.decode(
-            dataPayload: #"{"choices":[{"delta":{"tool_calls":[{"index":2,"function":{"arguments":"{\"q\":"}}]}}]}"#)
+            dataPayload: #"{"choices":[{"delta":{"tool_calls":[{"index":2,"function":{"arguments":"{\"q\":"}}]}}]}"#
+        )
         #expect(second == [
-            .toolCallDelta(index: 2, id: nil, name: nil, argumentsFragment: "{\"q\":")
+            .toolCallDelta(index: 2, id: nil, name: nil, argumentsFragment: "{\"q\":"),
         ])
 
         // A fragment without an index is call 0.
         let missingIndex = try codec.decode(
-            dataPayload: #"{"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"1}"}}]}}]}"#)
+            dataPayload: #"{"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"1}"}}]}}]}"#
+        )
         #expect(missingIndex == [
-            .toolCallDelta(index: 0, id: nil, name: nil, argumentsFragment: "1}")
+            .toolCallDelta(index: 0, id: nil, name: nil, argumentsFragment: "1}"),
         ])
     }
 
@@ -188,16 +206,19 @@ struct ChatCompletionsCodecTests {
     func finishReason() throws {
         #expect(
             try codec.decode(dataPayload: #"{"choices":[{"delta":{},"finish_reason":"length"}]}"#)
-                == [.finished(reason: .length, usage: nil)])
+                == [.finished(reason: .length, usage: nil)]
+        )
         #expect(
             try codec.decode(dataPayload: #"{"choices":[{"delta":{},"finish_reason":"weird"}]}"#)
-                == [.finished(reason: .unknown("weird"), usage: nil)])
+                == [.finished(reason: .unknown("weird"), usage: nil)]
+        )
     }
 
     @Test("Usage trailer with empty choices is valid and carries usage")
     func usageTrailer() throws {
         let events = try codec.decode(
-            dataPayload: #"{"id":"resp_1","choices":[],"usage":{"prompt_tokens":11,"completion_tokens":4,"total_tokens":15}}"#)
+            dataPayload: #"{"id":"resp_1","choices":[],"usage":{"prompt_tokens":11,"completion_tokens":4,"total_tokens":15}}"#
+        )
         #expect(events == [
             .started(responseID: "resp_1", model: nil),
             .finished(reason: .stop, usage: Usage(promptTokens: 11, completionTokens: 4, totalTokens: 15)),
@@ -210,11 +231,13 @@ struct ChatCompletionsCodecTests {
         // `Int(Double)` conversion, mid-stream, losing the whole answer since the
         // last checkpoint — and all of them are one line of untrusted JSON away.
         let events = try codec.decode(
-            dataPayload: #"{"choices":[],"usage":{"prompt_tokens":1e30,"completion_tokens":-1e30}}"#)
+            dataPayload: #"{"choices":[],"usage":{"prompt_tokens":1e30,"completion_tokens":-1e30}}"#
+        )
         #expect(events == [.finished(reason: .stop, usage: Usage())])
 
         let toolCall = try codec.decode(
-            dataPayload: #"{"choices":[{"delta":{"tool_calls":[{"index":1e30,"function":{"arguments":"{}"}}]}}]}"#)
+            dataPayload: #"{"choices":[{"delta":{"tool_calls":[{"index":1e30,"function":{"arguments":"{}"}}]}}]}"#
+        )
         #expect(toolCall == [.toolCallDelta(index: 0, id: nil, name: nil, argumentsFragment: "{}")])
 
         // A NaN/huge `code` must degrade to "no code", not to a crash.
@@ -225,11 +248,14 @@ struct ChatCompletionsCodecTests {
 
     @Test("A total_tokens that would overflow saturates instead of trapping")
     func usageTotalSaturates() throws {
-        let huge = 9.0e18  // just under Int.max; two of them overflow Int.
+        let huge = 9.0e18 // just under Int.max; two of them overflow Int.
         let events = try codec.decode(
-            dataPayload: #"{"choices":[],"usage":{"prompt_tokens":\#(huge),"completion_tokens":\#(huge)}}"#)
+            dataPayload: #"{"choices":[],"usage":{"prompt_tokens":\#(huge),"completion_tokens":\#(huge)}}"#
+        )
         let usage = try #require(events.compactMap { event -> Usage? in
-            if case .finished(_, let usage) = event { return usage }
+            if case let .finished(_, usage) = event {
+                return usage
+            }
             return nil
         }.first)
         #expect(usage.totalTokens == Int.max)
@@ -239,7 +265,8 @@ struct ChatCompletionsCodecTests {
     func inStreamErrors() throws {
         #expect(throws: GatewayError.inStreamError(code: "server_error", message: "boom")) {
             try codec.decode(
-                dataPayload: #"{"error":{"message":"boom","type":"server_error"}}"#)
+                dataPayload: #"{"error":{"message":"boom","type":"server_error"}}"#
+            )
         }
         #expect(throws: GatewayError.inStreamError(code: nil, message: "plain boom")) {
             try codec.decode(dataPayload: #"{"error":"plain boom"}"#)

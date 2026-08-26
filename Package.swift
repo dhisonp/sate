@@ -5,7 +5,7 @@ let package = Package(
     name: "SateCore",
     platforms: [.macOS(.v14), .iOS(.v17)],
     products: [
-        .library(name: "SateCore", targets: ["SateCore"])
+        .library(name: "SateCore", targets: ["SateCore"]),
     ],
     targets: [
         .target(
@@ -19,6 +19,6 @@ let package = Package(
             path: "Tests/SateCoreTests",
             resources: [.copy("Fixtures")],
             swiftSettings: [.swiftLanguageMode(.v6)]
-        )
+        ),
     ]
 )

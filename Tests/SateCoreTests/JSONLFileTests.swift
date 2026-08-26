@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import SateCore
+import Testing
 
 @Suite("JSONLFile")
 struct JSONLFileTests {
@@ -13,7 +12,9 @@ struct JSONLFileTests {
         try body(root)
     }
 
-    private func line(_ text: String) -> Data { Data(text.utf8) }
+    private func line(_ text: String) -> Data {
+        Data(text.utf8)
+    }
 
     @Test("append creates missing parent directories")
     func createsParentDirectories() throws {
@@ -121,7 +122,8 @@ struct JSONLFileTests {
             let file = JSONLFile(url: url)
             try file.append(line("first"), durable: true)
             let sizeBefore = try #require(
-                (try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int))
+                try (FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int)
+            )
 
             JSONLFile.shortWriteInjector = { target, payload in
                 target == url ? payload.count / 2 : nil
@@ -137,7 +139,8 @@ struct JSONLFileTests {
             // spent and a surviving fragment would fuse onto the next append —
             // turning two entries into one unparseable line that `load` drops.
             let sizeAfter = try #require(
-                (try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int))
+                try (FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int)
+            )
             #expect(sizeAfter == sizeBefore)
             #expect(try file.readLines().hadPartialTail == false)
 
@@ -152,11 +155,11 @@ struct JSONLFileTests {
     func truncateIsNoOpWhenClean() throws {
         try withTempDirectory { root in
             let file = JSONLFile(url: root.appending(path: "log.jsonl"))
-            try file.truncatePartialTail()  // absent
+            try file.truncatePartialTail() // absent
             #expect(file.exists() == false)
 
             try file.append(line("a"), durable: true)
-            try file.truncatePartialTail()  // clean
+            try file.truncatePartialTail() // clean
             #expect(try file.readLines().lines.count == 1)
         }
     }

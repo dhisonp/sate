@@ -27,7 +27,9 @@ public struct ModelOption: Sendable, Hashable, Identifiable, Codable {
         self.supportsTools = supportsTools
     }
 
-    public var displayName: String { "\(name) · \(vendor)" }
+    public var displayName: String {
+        "\(name) · \(vendor)"
+    }
 }
 
 /// The models Sate offers by name. Deliberately only Cloudflare's own `@cf`
@@ -55,7 +57,8 @@ public enum ModelCatalog {
             summary: "Mixture-of-experts, 4B active. Long context and a thinking mode.",
             contextTokens: 256_000,
             reasons: true,
-            supportsTools: true),
+            supportsTools: true
+        ),
         ModelOption(
             id: "@cf/qwen/qwen3.8-27b",
             name: "Qwen 3.8 27B",
@@ -63,26 +66,31 @@ public enum ModelCatalog {
             summary: "General-purpose and agentic, with reasoning. Longest window here.",
             contextTokens: 262_144,
             reasons: true,
-            supportsTools: true),
+            supportsTools: true
+        ),
         ModelOption(
             id: "@cf/qwen/qwen3-30b-a3b-fp8",
             name: "Qwen3 30B A3B",
             vendor: "Alibaba",
             summary: "3B active per pass — fast, at a much smaller window.",
-            contextTokens: 32_768,
+            contextTokens: 32768,
             reasons: true,
-            supportsTools: true),
+            supportsTools: true
+        ),
         ModelOption(
             id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
             name: "Llama 3.3 70B Fast",
             vendor: "Meta",
             summary: "fp8-quantized for latency. Cheapest of these per token.",
-            contextTokens: 24_000,
+            contextTokens: 24000,
             reasons: false,
-            supportsTools: true)
+            supportsTools: true
+        ),
     ]
 
-    public static var all: [ModelOption] { workersAI }
+    public static var all: [ModelOption] {
+        workersAI
+    }
 
     /// Chosen for the default chat model because it pairs the long window with a
     /// small active-parameter count, so a long transcript stays affordable.
@@ -113,6 +121,7 @@ public enum ModelCatalog {
         return ContextWindow(
             model: model,
             inputBudgetTokens: option.contextTokens,
-            reserveForOutputTokens: min(8_000, max(1_024, option.contextTokens / 4)))
+            reserveForOutputTokens: min(8000, max(1024, option.contextTokens / 4))
+        )
     }
 }

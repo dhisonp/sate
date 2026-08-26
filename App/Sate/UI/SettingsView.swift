@@ -82,8 +82,9 @@ struct SettingsView: View {
                 TextField(
                     "Optional instructions sent with every turn",
                     text: $env.settings.systemPrompt,
-                    axis: .vertical)
-                    .lineLimit(3...12)
+                    axis: .vertical
+                )
+                .lineLimit(3 ... 12)
 
                 if env.settings.systemPrompt != SystemPrompt.researchAssistant {
                     Button("Restore Default Prompt") {
@@ -107,13 +108,14 @@ struct SettingsView: View {
                 if isTemperatureEnabled {
                     let temperature = Binding<Double>(
                         get: { env.settings.temperature ?? 0.7 },
-                        set: { env.settings.temperature = $0 })
+                        set: { env.settings.temperature = $0 }
+                    )
                     VStack(alignment: .leading) {
                         Text(String(format: "Temperature %.2f", temperature.wrappedValue))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
-                        Slider(value: temperature, in: 0...2, step: 0.05)
+                        Slider(value: temperature, in: 0 ... 2, step: 0.05)
                             .accessibilityLabel("Temperature")
                     }
                 }
@@ -199,6 +201,7 @@ private struct ModelField: View {
                     isCustom = false
                     model = newValue
                 }
-            })
+            }
+        )
     }
 }

@@ -1,0 +1,23 @@
+disabled_rules:
+  - trailing_whitespace
+  - file_header
+  - unused_import
+
+opt_in_rules:
+  - empty_count
+  - force_unwrapping
+  - indentation_width
+  - fatal_error_message
+  - identifier_name
+  - line_length
+  - redundant_nil_coalescing
+  - redundant_type_annotation
+
+included:
+  - Sources
+  - App
+  - Tests
+
+excluded:
+  - .build
+  - .build/

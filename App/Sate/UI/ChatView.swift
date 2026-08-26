@@ -87,9 +87,10 @@ struct ChatView: View {
                             message: message,
                             siblings: vm.siblings(of: message.id),
                             onEdit: beginEditing,
-                            onSwitchBranch: { id in Task { await vm.switchBranch(to: id) } })
-                            .equatable()
-                            .id(message.id)
+                            onSwitchBranch: { id in Task { await vm.switchBranch(to: id) } }
+                        )
+                        .equatable()
+                        .id(message.id)
                     }
 
                     // Always present, so committing the draft into the transcript
@@ -125,10 +126,14 @@ struct ChatView: View {
                 switch newPhase {
                 case .interacting, .decelerating:
                     isUserDriven = true
-                    if !isAtBottom { isPinned = false }
+                    if !isAtBottom {
+                        isPinned = false
+                    }
                 default:
                     isUserDriven = false
-                    if isAtBottom { isPinned = true }
+                    if isAtBottom {
+                        isPinned = true
+                    }
                 }
             }
             .overlay(alignment: .bottom) {
@@ -161,7 +166,8 @@ struct ChatView: View {
         if !vm.phase.isBusy,
            let trace = vm.lastTrace,
            let last = vm.messages.last,
-           last.role == .assistant {
+           last.role == .assistant
+        {
             VStack(alignment: .leading, spacing: 3) {
                 Text(footerLine(trace: trace, usage: last.usage))
                     .font(.caption2)
@@ -180,15 +186,21 @@ struct ChatView: View {
     private func footerLine(trace: NetworkTrace, usage: Usage?) -> String {
         var parts: [String] = []
         let model = trace.model.isEmpty ? vm.model : trace.model
-        if !model.isEmpty { parts.append(model) }
-        if let usage { parts.append("\(usage.promptTokens) in / \(usage.completionTokens) out") }
+        if !model.isEmpty {
+            parts.append(model)
+        }
+        if let usage {
+            parts.append("\(usage.promptTokens) in / \(usage.completionTokens) out")
+        }
         if let ttfb = trace.timeToFirstByte {
             parts.append("TTFB \(Int((ttfb * 1000).rounded())) ms")
         }
         if let duration = trace.duration {
             parts.append(String(format: "%.1fs", duration))
         }
-        if trace.cacheStatus == "HIT" { parts.append("cached") }
+        if trace.cacheStatus == "HIT" {
+            parts.append("cached")
+        }
         return parts.joined(separator: " · ")
     }
 
@@ -211,7 +223,7 @@ struct ChatView: View {
         case .awaitingFirstToken:
             statusRow { ThinkingIndicator(draft: vm.draft).statusPillGlass() }
 
-        case .failed(let error):
+        case let .failed(error):
             statusRow {
                 ErrorBanner(error: error, onRetry: { Task { await vm.retry() } })
             }
@@ -226,14 +238,12 @@ struct ChatView: View {
         }
     }
 
-    @ViewBuilder
     private func statusRow<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
     }
 
-    @ViewBuilder
     private func recoveryRow(title: String) -> some View {
         HStack(spacing: 12) {
             Text(title)
@@ -288,7 +298,7 @@ struct ChatView: View {
             AccessibilityNotification.Announcement("Response complete").post()
         case .interrupted:
             AccessibilityNotification.Announcement("Response interrupted").post()
-        case .failed(let error):
+        case let .failed(error):
             AccessibilityNotification.Announcement(error.userMessage).post()
         case .sending, .awaitingFirstToken, .streaming:
             break
@@ -324,8 +334,7 @@ private extension View {
     /// on regular glass. `.clear` is wrong here — the pill floats over plain
     /// text, not media.
     func statusPillGlass() -> some View {
-        self
-            .padding(.horizontal, 14)
+        padding(.horizontal, 14)
             .padding(.vertical, 9)
             .glassEffect(.regular, in: .capsule)
     }

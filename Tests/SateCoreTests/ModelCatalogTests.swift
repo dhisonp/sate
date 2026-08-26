@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 @testable import SateCore
+import Testing
 
 @Suite("ModelCatalog")
 struct ModelCatalogTests {
@@ -34,7 +34,7 @@ struct ModelCatalogTests {
     func windows() {
         let settings = SateSettings()
         let known = settings.window(for: "@cf/qwen/qwen3-30b-a3b-fp8")
-        #expect(known.inputBudgetTokens == 32_768)
+        #expect(known.inputBudgetTokens == 32768)
         #expect(known.effectiveBudgetTokens < known.inputBudgetTokens)
 
         let custom = settings.window(for: "some/unlisted-model")
@@ -46,8 +46,8 @@ struct ModelCatalogTests {
     func storedWindowWins() {
         var settings = SateSettings()
         settings.contextWindows["@cf/qwen/qwen3-30b-a3b-fp8"] =
-            ContextWindow(model: "", inputBudgetTokens: 4_096, reserveForOutputTokens: 512)
-        #expect(settings.window(for: "@cf/qwen/qwen3-30b-a3b-fp8").inputBudgetTokens == 4_096)
+            ContextWindow(model: "", inputBudgetTokens: 4096, reserveForOutputTokens: 512)
+        #expect(settings.window(for: "@cf/qwen/qwen3-30b-a3b-fp8").inputBudgetTokens == 4096)
     }
 
     @Test("REST keeps the bare @cf id; compat qualifies it with the provider")

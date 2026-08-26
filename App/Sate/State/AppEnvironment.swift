@@ -18,6 +18,7 @@ final class AppEnvironment {
     var settings: SateSettings {
         didSet { persistSettings() }
     }
+
     private(set) var conversations: [ConversationSummary] = []
     /// Messages restored from `.inflight` sidecars at launch, so the UI can say
     /// what happened after a crash or a termination mid-stream.
@@ -62,16 +63,17 @@ final class AppEnvironment {
         self.secrets = secrets
         self.defaults = defaults
         self.isMock = isMock
-        self.cachedToken = try? secrets.token()
-        self.urlSession = isMock ? nil : AppEnvironment.makeURLSession()
+        cachedToken = try? secrets.token()
+        urlSession = isMock ? nil : AppEnvironment.makeURLSession()
         if isMock {
-            self.client = MockGatewayClient()
-            self.configurationSignature = "mock"
+            client = MockGatewayClient()
+            configurationSignature = "mock"
         } else {
             let configuration = AppEnvironment.configuration(
-                settings: settings, token: (try? secrets.token()) ?? "")
-            self.client = GatewayClient(configuration: configuration, session: self.urlSession)
-            self.configurationSignature = AppEnvironment.signature(configuration)
+                settings: settings, token: (try? secrets.token()) ?? ""
+            )
+            client = GatewayClient(configuration: configuration, session: urlSession)
+            configurationSignature = AppEnvironment.signature(configuration)
         }
     }
 
@@ -81,12 +83,14 @@ final class AppEnvironment {
 
         var settings = SateSettings()
         if let data = defaults.data(forKey: Key.settings),
-           let decoded = try? JSONDecoder().decode(SateSettings.self, from: data) {
+           let decoded = try? JSONDecoder().decode(SateSettings.self, from: data)
+        {
             settings = decoded
         }
         var estimator = TokenEstimator()
         if let data = defaults.data(forKey: Key.estimator),
-           let decoded = try? JSONDecoder().decode(TokenEstimator.self, from: data) {
+           let decoded = try? JSONDecoder().decode(TokenEstimator.self, from: data)
+        {
             estimator = decoded
         }
 
@@ -103,7 +107,8 @@ final class AppEnvironment {
             store: store,
             secrets: secrets,
             defaults: defaults,
-            isMock: isMock)
+            isMock: isMock
+        )
     }
 
     // MARK: - Lifecycle
@@ -123,7 +128,8 @@ final class AppEnvironment {
 
     func newConversation() async -> UUID? {
         guard let header = try? await store.create(
-            title: "New Conversation", model: settings.defaultModel)
+            title: "New Conversation", model: settings.defaultModel
+        )
         else { return nil }
         await refresh()
         return header.conversationID
@@ -142,11 +148,14 @@ final class AppEnvironment {
     }
 
     func viewModel(for id: UUID) -> ChatViewModel {
-        if let existing = viewModels[id] { return existing }
+        if let existing = viewModels[id] {
+            return existing
+        }
         let session = sessions[id] ?? ConversationSession(conversationID: id, store: store)
         sessions[id] = session
         let model = ChatViewModel(
-            conversationID: id, store: store, session: session, environment: self)
+            conversationID: id, store: store, session: session, environment: self
+        )
         viewModels[id] = model
         return model
     }
@@ -200,7 +209,8 @@ final class AppEnvironment {
     private func rebuildClientIfNeeded() {
         guard !isMock else { return }
         let configuration = AppEnvironment.configuration(
-            settings: settings, token: cachedToken ?? "")
+            settings: settings, token: cachedToken ?? ""
+        )
         let signature = AppEnvironment.signature(configuration)
         guard signature != configurationSignature else { return }
         configurationSignature = signature
@@ -212,7 +222,8 @@ final class AppEnvironment {
             accountID: settings.accountID.trimmingCharacters(in: .whitespacesAndNewlines),
             gatewayID: settings.gatewayID.isEmpty ? nil : settings.gatewayID,
             token: token,
-            collectLogPayload: settings.collectLogPayload)
+            collectLogPayload: settings.collectLogPayload
+        )
     }
 
     /// Identity without the token itself — only whether one is present and how it
@@ -222,7 +233,7 @@ final class AppEnvironment {
             configuration.accountID,
             configuration.gatewayID ?? "",
             String(configuration.token.hashValue),
-            String(configuration.collectLogPayload)
+            String(configuration.collectLogPayload),
         ].joined(separator: "|")
     }
 
@@ -248,7 +259,8 @@ final class AppEnvironment {
         try? FileManager.default.createDirectory(
             at: directory,
             withIntermediateDirectories: true,
-            attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
+            attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
+        )
         return directory
     }
 }

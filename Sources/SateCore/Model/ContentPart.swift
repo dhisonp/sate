@@ -14,7 +14,7 @@ public enum ContentPart: Codable, Hashable, Sendable {
         let type = try container.decodeIfPresent(String.self, forKey: .type) ?? "text"
         switch type {
         case "text":
-            self = .text(try container.decodeIfPresent(String.self, forKey: .text) ?? "")
+            self = try .text(container.decodeIfPresent(String.self, forKey: .text) ?? "")
         default:
             // Forward compatibility: an unknown part degrades to empty text rather
             // than failing the whole conversation load.
@@ -25,7 +25,7 @@ public enum ContentPart: Codable, Hashable, Sendable {
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .text(let value):
+        case let .text(value):
             try container.encode("text", forKey: .type)
             try container.encode(value, forKey: .text)
         }
@@ -33,7 +33,7 @@ public enum ContentPart: Codable, Hashable, Sendable {
 
     public var textValue: String {
         switch self {
-        case .text(let value): return value
+        case let .text(value): return value
         }
     }
 }

@@ -24,10 +24,12 @@ actor MockGatewayClient: LLMStreaming {
 
     init() {}
 
-    var lastTrace: NetworkTrace? { trace }
+    var lastTrace: NetworkTrace? {
+        trace
+    }
 
     nonisolated func stream(
-        _ request: ChatCompletionRequest, conversationID: UUID? = nil
+        _ request: ChatCompletionRequest, conversationID _: UUID? = nil
     ) -> AsyncThrowingStream<StreamEvent, any Error> {
         AsyncThrowingStream { continuation in
             let work = Task { await self.replay(request, continuation: continuation) }
@@ -50,14 +52,16 @@ actor MockGatewayClient: LLMStreaming {
             model: request.model,
             statusCode: 200,
             logID: "mock-\(UUID().uuidString.prefix(8))",
-            cacheStatus: "MISS")
+            cacheStatus: "MISS"
+        )
 
         if prompt.contains("unauthorized") {
             trace.statusCode = 401
             trace.duration = Date().timeIntervalSince(start)
             record(trace)
             continuation.finish(
-                throwing: GatewayError.unauthorized(message: "Mock: the token was rejected."))
+                throwing: GatewayError.unauthorized(message: "Mock: the token was rejected.")
+            )
             return
         }
 
@@ -80,7 +84,9 @@ actor MockGatewayClient: LLMStreaming {
             do {
                 try await Task.sleep(
                     nanoseconds: UInt64.random(
-                        in: Self.minimumDelayNanoseconds...Self.maximumDelayNanoseconds))
+                        in: Self.minimumDelayNanoseconds ... Self.maximumDelayNanoseconds
+                    )
+                )
             } catch {
                 trace.duration = Date().timeIntervalSince(start)
                 record(trace)
@@ -96,7 +102,9 @@ actor MockGatewayClient: LLMStreaming {
 
             do {
                 for event in try parser.consume(bytes) {
-                    if event.isTerminator { break feed }
+                    if event.isTerminator {
+                        break feed
+                    }
                     // decodeChunk, not decode: only it distinguishes a reason the
                     // provider actually sent from the placeholder that a usage-only
                     // trailer carries. Coalescing on the flattened form would let a
@@ -112,8 +120,12 @@ actor MockGatewayClient: LLMStreaming {
                     }
                     // Same contract as GatewayClient: first OBSERVED reason wins,
                     // last usage wins, exactly one terminal event at the end.
-                    if reason == nil, let observed = termination.reason { reason = observed }
-                    if let reported = termination.usage { usage = reported }
+                    if reason == nil, let observed = termination.reason {
+                        reason = observed
+                    }
+                    if let reported = termination.usage {
+                        usage = reported
+                    }
                 }
             } catch let error as GatewayError {
                 trace.duration = Date().timeIntervalSince(start)
@@ -150,6 +162,7 @@ actor MockGatewayClient: LLMStreaming {
     }
 
     // MARK: - Scripts
+
     //
     // Raw string literals so the `\n` sequences inside the JSON stay backslash-n
     // on the wire; a real newline there would be invalid JSON.
