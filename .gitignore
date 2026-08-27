@@ -8,3 +8,4 @@ App/Sate.xcodeproj/xcuserdata/
 build/
 
 local/
+.worktrees/
