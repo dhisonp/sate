@@ -425,8 +425,11 @@ enum MarkdownInline {
         options.failurePolicy = .returnPartiallyParsedIfPossible
         var attr = (try? AttributedString(markdown: prepared, options: options)) ?? AttributedString(source)
         for run in attr.runs {
-            if let intent = run.inlinePresentationIntent, intent.contains(.code) {
-                attr[run.range].font = .appMono(size: 15, relativeTo: .body)
+            if var intent = run.inlinePresentationIntent, intent.contains(.code) {
+                intent.remove(.code)
+                attr[run.range].inlinePresentationIntent = intent.isEmpty ? nil : intent
+                attr[run.range].font = .appMono(size: 16, relativeTo: .body)
+                attr[run.range].backgroundColor = Color.secondary.opacity(0.12)
             }
         }
         return attr
