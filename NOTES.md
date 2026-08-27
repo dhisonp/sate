@@ -1,47 +1,23 @@
-# Sate — overnight build handoff
+# Sate — NOTES
 
-*Status as of the core milestone; UI layer, review pass, Liquid Glass pass and
-prompt work are appended below as they land.*
+Living status and operator knowledge. Architecture, commands, conventions,
+and philosophy live in [`AGENTS.md`](AGENTS.md) and [`VISION.md`](VISION.md);
+defects and their regression tests live in [`docs/bugs.md`](docs/bugs.md). This
+file holds what neither of those covers: how to actually point Sate at a real
+gateway, design decisions worth knowing before touching the seams they protect,
+and the current open-work list.
 
-## What this is
+## Status
 
-A native iOS AI chat client that is deliberately a **dumb terminal**. It carries
-no LLM SDK and no provider code: every request goes to **Cloudflare AI Gateway**,
-which holds the provider keys (BYOK) and owns routing, fallbacks, retries, rate
-limits, spend limits and logging. The app owns only what a broker physically
-cannot — the HTTP request, SSE framing, conversation history, on-device
-persistence, and rendering.
-
-Design lineage is the Pi agent harness: minimal harness, append-only JSONL
-sessions with an `id`/`parentId` branch tree, a normalized stream-event
-vocabulary, and partial-message preservation on abort.
-
-## Layout
-
-```
-Package.swift          SwiftPM: builds Sources/SateCore for macOS unit tests
-Sate.xcodeproj         hand-written pbxproj (objectVersion 77)
-Sources/SateCore/      Foundation-only engine — no SwiftUI, no UIKit
-App/Sate/              SwiftUI app; compiles SateCore sources directly
-Tests/SateCoreTests/   Swift Testing suites + .sse fixtures
-scripts/               build.sh · test.sh · e2e.sh · capture-fixtures.sh
-docs/superpowers/specs/2026-08-26-sate-design.md   the full design spec
-docs/reference/liquid-glass-ios26.md               iOS 26 glass API notes
-```
-
-Two build systems over one source tree, on purpose: `swift test` runs the engine
-on macOS in under a second (no simulator), while the Xcode target attaches
-`Sources/SateCore` and `App/Sate` as file-system-synchronized groups — so there
-are no file lists in the project to drift as files are added.
-
-## Commands
-
-```bash
-./scripts/test.sh              # SateCore unit suite (macOS, fast)
-./scripts/build.sh             # build the app for the simulator
-./scripts/e2e.sh               # build → boot → install → launch → screenshot
-SATE_CF_ACCOUNT=... SATE_CF_TOKEN=... ./scripts/capture-fixtures.sh anthropic/claude-opus-5
-```
+- **225 tests in 23 suites passing** (`./scripts/test.sh`, ~1s, macOS, no
+  simulator).
+- iOS app builds under Swift 6 strict concurrency; every path screenshotted in
+  `artifacts/` via `./scripts/e2e.sh` (mock mode through the real parser/codec).
+- **Never exercised against real Cloudflare** — that is open-work item 1.
+- Web search (Tavily), thinking-policy + in-band reasoning parsing, the
+  `ModelCatalog` picker, the app icon, and the Keychain/main-thread startup fixes
+  are all landed since the original handoff.
+- 13 defects logged in `docs/bugs.md`, all fixed with regression tests.
 
 ## To actually use it against Cloudflare
 
@@ -59,43 +35,6 @@ SATE_CF_ACCOUNT=... SATE_CF_TOKEN=... ./scripts/capture-fixtures.sh anthropic/cl
 5. Enter the account ID and token in the app's Settings. The token is written
    only to the Keychain.
 
----
-
-# Overnight result
-
-## Status: working app, end to end
-
-The app builds, runs in the simulator, and streams a full response with live
-token rendering, markdown-on-commit, persistence and the error paths. It has
-**never been run against real Cloudflare** — that needs your account ID and a
-token, and is the first thing to do in the morning (see *Pending*, item 1).
-
-- **160 tests in 15 suites passing** (`./scripts/test.sh`, ~1.3s, no simulator).
-- **`** BUILD SUCCEEDED **`** for the iOS app under Swift 6 strict concurrency.
-- Screenshots of every path in `artifacts/` — launch, mid-stream, completed,
-  error, truncated, unauthorized, settings.
-
-## What was built
-
-**SateCore** (Foundation only, no dependencies):
-- `SSEParser` — byte-level SSE framing: CRLF / lone-CR, multibyte split across
-  chunk boundaries, BOM, keepalive comments, multi-line `data:`, per-event caps.
-  UTF-8 is decoded per assembled line, never per chunk.
-- `ChatCompletionsCodec` — OpenAI chat-completions in, normalized
-  `StreamEvent`s out. Handles `reasoning_content`/`reasoning`, tool-call deltas
-  joined on `index`, the empty-`choices` usage trailer, and in-stream errors.
-- `GatewayClient` — both Cloudflare routes behind one codec, full error mapping,
-  a connectivity budget, and a retry policy that never re-bills a partially
-  delivered generation.
-- `ConversationStore` — append-only JSONL with an `id`/`parentId` branch tree,
-  `F_FULLFSYNC` commits, partial-tail recovery, `.inflight` checkpoints.
-- `ContextBuilder` / `TokenEstimator` — oldest-first trimming that never splits
-  a turn pair, with per-model chars-per-token calibrated from returned `usage`.
-
-**App** (SwiftUI, iOS 26): conversation list, chat with live streaming, branch
-navigation, edit-and-resend, Continue/Retry, settings, debug panel, Keychain
-token storage, background-task guard, and an offline mock.
-
 ## Design decisions worth knowing
 
 - **The generation is owned by `ConversationSession`, not a SwiftUI `.task`.**
@@ -111,247 +50,97 @@ token storage, background-task guard, and an offline mock.
   re-lays out — otherwise a 20k-character answer is O(n²) layout.
 - **Glass is confined to the navigation layer** (composer, chips, banners,
   badges). Apple's guidance is explicit that content — the transcript, bubbles,
-  code blocks — must not be glass.
+  code blocks — must not be glass. Adjacent glass shares one
+  `GlassEffectContainer`; glass cannot sample other glass.
+- **`{{CURRENT_DATE}}` is substituted at request-build time**, not when the
+  prompt is saved, so the model always knows today's real date. The default
+  prompt is a research-assistant voice: direct answer first, length matched to
+  the question, and for time-sensitive claims the model must state *what it
+  last knew and roughly when* rather than asserting a possibly-stale fact as
+  current.
+- **`ModelCatalog` is static on purpose.** There is no unauthenticated endpoint
+  that enumerates gateway-reachable models; a settings screen that can fail to
+  populate is worse than a short list plus a **Custom** row for any other
+  `provider/model` the gateway resolves. The two hosts spell Workers AI models
+  differently (REST: bare `@cf/author/model`; compat: `workers-ai/@cf/...`); the
+  catalog stores the REST form and `GatewayRoute.wireModel(_:)` rewrites it.
+- **Workers AI on REST requires `cf-aig-gateway-id`.** The client falls back to
+  `default` for `@cf` models when no gateway id is set, so a fresh install works.
 
-## Bugs found by review and fixed
-
-Full write-ups — failure scenario, root cause, fix, regression test — are in
-[`docs/bugs.md`](docs/bugs.md). Summary:
-
-Two adversarial reviewers read the core; a third read the app layer. The
-substantive finds, all now fixed with regression tests:
-
-1. **A remotely-triggerable crash.** `JSONValue.intValue` used `Int(Double)`,
-   which *traps*. A chunk containing `"prompt_tokens": 1e30` — or any provider
-   emitting an oversized integer — aborted the process mid-stream, losing
-   everything since the last checkpoint.
-2. **Truncated answers reported as clean.** A usage-only trailer arriving before
-   the finish chunk masked the real `finish_reason`, so a response cut off at
-   `max_tokens` looked complete and never offered *Continue*. Providers that
-   stream cumulative usage on every chunk hit this on *every* generation.
-3. **An unbootable app.** `ConversationIndex` used `Dictionary(uniqueKeysWithValues:)`,
-   which traps on duplicates — one iCloud conflict-copy transcript crashed the
-   conversation list on launch.
-4. **A 30-minute hang on a bad network.** `waitsForConnectivity` suppressed the
-   offline error, so an offline send blocked against the 900s resource timeout,
-   surfaced as "The model stopped responding", and then *retried*.
-5. **A duplicate message** when the leaf write failed after the message landed.
-6. **Silent double data loss** when a short write fused onto the next append.
-
-A third reviewer read the app layer and found two more, both since fixed:
-
-7. **A cheap Continue was being turned into a re-billed Regenerate.** Any
-   non-cancel error set `phase = .failed` even when a partial answer had already
-   been committed, so the UI showed only *Retry* — and Retry on an assistant turn
-   regenerates the whole answer and pays for it again. Dropping Wi-Fi after 500
-   streamed tokens is the common case. Now a committed partial always yields
-   `.interrupted`, which offers *Continue*.
-8. **Background grace only covered the on-screen conversation.** A generation
-   left running while you navigate back to the list got no background-task
-   assertion and no deliberate interrupted-commit when iOS suspended the app.
-   Scene changes now reach every live conversation.
-
-The reviewer independently confirmed the R3 streaming-performance contract holds
-(no `Draft` reads in `ChatView.body`, no `List`, frozen paragraphs intact, no
-expensive effects on the mutating text, no animation on token flush), and found
-no token-leak path.
-
-## Liquid Glass pass
-
-Applied per Apple's iOS 26 guidance (`docs/reference/liquid-glass-ios26.md`),
-deliberately conservative:
-
-| Element | Treatment |
-|---|---|
-| Composer field | `.glassEffect(.regular, in: .capsule)` |
-| Send | `.buttonStyle(.glassProminent)`, circle + `.clipShape` (documented artifact) |
-| Stop | `.buttonStyle(.glass)`, ≥44pt |
-| Status pill, recovery row, debug panel | `.glassEffect(.regular, …)` |
-| Error banner | `.regular.tint(.orange…)` — tint carries state, not decoration |
-| MOCK badge, new-tokens chip | glass capsule |
-
-The opaque bottom bar and its divider are gone; content now flows under floating
-chrome with the system scroll-edge effect. All adjacent glass shares a single
-`GlassEffectContainer` — glass cannot sample other glass, so uncontained
-siblings render inefficiently and sample inconsistently.
-
-**Not glassed, on purpose:** message bubbles, transcript, reasoning blocks, code
-blocks, completion footer. Those are the content layer, and glassing them is the
-specific anti-pattern Apple calls out. Reduced Transparency / Increased Contrast /
-Reduced Motion are handled by the system — nothing overrides them.
-
-## System prompt
-
-The default is now a concise, professional research-assistant voice:
-direct answer first, length matched to the question, no filler, no closing
-offers of help.
-
-**An honest caveat about "latest data".** Sate is a pure LLM client — no web
-search, no retrieval. A prompt cannot make the model fetch current information.
-What it does instead:
-
-- `{{CURRENT_DATE}}` is substituted at **request-build time** (not when the
-  prompt is saved), so the model always knows today's real date instead of
-  reasoning from its training cutoff.
-- The prompt requires the model to state *what it last knew and roughly when*
-  for anything time-sensitive, and to flag it for verification — rather than
-  asserting a possibly-stale fact as current.
-
-If you want genuinely live answers, that needs a retrieval step — see *Pending*,
-item 7. Editable in Settings, with a **Restore Default Prompt** action.
-
-## Environment: iOS 26.5 & Shared DerivedData
-
-`xcodebuild` targets the iOS 26.5 simulator runtime using the `Sate` scheme (`-scheme Sate -destination ...`). Scripts share standard DerivedData with Xcode's Cmd+R (`~/Library/Developer/Xcode/DerivedData/Sate-...`), allowing instantaneous incremental builds across the CLI and Xcode without duplicate compilation. `build/` contains a symlink to DerivedData for backwards compatibility.
-
-## Verifying it yourself
-
-```bash
-./scripts/test.sh     # 160 tests, ~1.3s
-./scripts/e2e.sh      # rebuilds and regenerates every screenshot in artifacts/
-```
-
-`e2e.sh` drives the app with `SATE_DEMO=1` + `SATE_MOCK=1` rather than synthetic
-taps: coordinate clicking against the Simulator window is brittle and silently
-wrong when the window moves. The mock replays a bundled SSE fixture through the
-**real** parser and codec, so everything except the socket is exercised.
-
----
-
-# Pending — suggested order
+## Open work — suggested order
 
 ### 1. Run it against real Cloudflare (do this first)
-Everything below is downstream of this. Set up the gateway per *To actually use
-it* above, then:
+Everything risky is downstream of this. Set up the gateway per above, then:
 ```bash
 SATE_CF_ACCOUNT=... SATE_CF_TOKEN=... ./scripts/capture-fixtures.sh anthropic/claude-opus-5
 ```
-That prints the real SSE and the response headers, and saves a fixture. Repeat
-for an OpenAI and a Google model — **the codec has only ever been tested against
-fixtures I wrote**, and OpenAI-schema translation to non-OpenAI providers is the
-single biggest unknown in the design. Then enter the account ID and token in
-Settings and send a real message.
+That prints the real SSE and response headers and saves a fixture. Repeat for an
+OpenAI and a Google model — OpenAI-schema translation to non-OpenAI providers is
+the single biggest unknown. Then enter the account ID and token in Settings and
+send a real message.
 
 ### 2. Verify the reasoning-model path
-The weakest point in the whole stack. Anthropic thinking deltas may be dropped
-entirely by the OpenAI-compat translation, and cellular NAT drops idle flows
-around 60s while the Cloudflare edge returns 524 near 100s time-to-first-byte.
-Send a hard prompt to an extended-thinking model on cellular and watch what
-happens. If it bites, the options are (a) prefer models that emit an early
-chunk, (b) bound the reasoning budget via `extra`, (c) switch the codec to the
-Anthropic-schema REST endpoint for thinking models.
+The weakest point. Anthropic thinking deltas may be dropped entirely by the
+OpenAI-compat translation, and cellular NAT drops idle flows around 60s while the
+Cloudflare edge returns 524 near 100s time-to-first-byte. Send a hard prompt to
+an extended-thinking model on cellular and watch what happens. If it bites, the
+options are (a) prefer models that emit an early chunk, (b) bound the reasoning
+budget via `extra`, (c) switch the codec to the Anthropic-schema REST endpoint
+for thinking models.
 
 ### 3. Conversation titles
-`GatewayClient` has no non-streaming `complete()`, so R1.10 (a cheap
-auto-title call with `cf-aig-cache-ttl: 86400`) is unimplemented. Titles are
-currently derived locally from the first user line, which costs nothing and
-works — decide whether the model-generated version is worth the tokens.
+`GatewayClient` has no non-streaming `complete()`, so a cheap auto-title call
+(`cf-aig-cache-ttl: 86400`) is unimplemented. Titles are currently derived
+locally from the first user line — decide whether the model-generated version is
+worth the tokens.
 
 ### 4. Dynamic routes
 `GatewayRoute.compat` and the `dynamic/*` model prefix are implemented and unit
 tested but have never hit a real dynamic route. Create one in the dashboard
-(primary model → budget-limit node → cheaper fallback) and confirm `cf-aig-step`
-shows up in the debug panel and the footer says "served by fallback".
+(primary → budget-limit node → cheaper fallback) and confirm `cf-aig-step` shows
+up in the debug panel and the footer says "served by fallback".
 
 ### 5. Performance measurement
-The R3 architecture is built for it but **no Instruments run has been done**.
-Profile a 10k-token stream with the Hangs and Time Profiler templates on the
-oldest device you care about; the target is zero main-thread hangs over 50ms.
-
-**Startup / new-chat fixes applied.** Sampling a simulator launch showed two
-real main-thread costs: `SecItemCopyMatching` during `AppEnvironment` init
-(~4 ms in the sample, but synchronous and on the main thread), and
-`F_FULLFSYNC` inside `ConversationStore.create` for the empty header line. Both
-are now gone from the main path:
-- `AppEnvironment` no longer reads the Keychain in `init`; tokens are loaded
-  with `Task.detached` during `bootstrap()`.
-- `bootstrap()` only calls `recoverCheckpoints()` when `hasCheckpoints()`
-  reports sidecars, keeping the heavy recovery path on the post-crash edge case.
-- `ConversationStore.create` writes the header line without `F_FULLFSYNC`.
-  The first message append still issues the durable barrier, so user text is
-  protected; an empty header-only file contains nothing to lose.
-- `AppEnvironment.newConversation()` inserts the new summary directly into the
-  sorted list instead of reloading the whole index.
+No Instruments run has been done. Profile a 10k-token stream with the Hangs and
+Time Profiler templates on the oldest device you care about; the target is zero
+main-thread hangs over 50ms. (The earlier main-thread startup costs —
+`SecItemCopyMatching` in `AppEnvironment` init and `F_FULLFSYNC` in
+`ConversationStore.create` — are already off the main path; see bug history.)
 
 ### 6. Real-device checks the simulator cannot give you
-VoiceOver (announcements fire, streaming text is not re-read per flush),
-Dynamic Type at XXXL, Reduce Motion, backgrounding mid-stream, Airplane Mode
-mid-stream, and killing the app mid-stream to confirm `.inflight` recovery.
+VoiceOver (announcements fire, streaming text not re-read per flush), Dynamic
+Type at XXXL, Reduce Motion, backgrounding mid-stream, Airplane Mode mid-stream,
+and killing the app mid-stream to confirm `.inflight` recovery.
 
-### 7. If you want genuinely live answers
-The current prompt manages the model's *honesty* about recency; it cannot create
-knowledge. Real currency needs retrieval — either a provider with server-side
-search, or a Cloudflare Worker that does the search and injects results. Note
-that the second one breaks the "no backend of our own" premise, which is a real
-architectural decision rather than a small feature.
-
-### 8. The app layer has no tests
-All 160 tests cover `SateCore`. `App/Sate/**` has none — which is exactly why
-the two defects above needed a human-style read to find. The app layer was built
-to be testable (`LLMStreaming` is injectable, `ConversationStore` takes a
-directory, the coalescer takes a `Clock`), so a small suite around
-`ChatViewModel`'s error matrix and `ConversationSession`'s commit paths would be
-cheap and would guard the parts where mistakes cost money. This needs either an
+### 7. The app layer has no tests
+All 225 tests cover `SateCore`; `App/Sate/**` has none — which is why the
+Continue-vs-Retry and background-grace defects (bugs #7–8) needed a human read
+to find. The app layer was built to be testable (`LLMStreaming` injectable,
+`ConversationStore` takes a directory, the coalescer takes a `Clock`), so a
+small suite around `ChatViewModel`'s error matrix and `ConversationSession`'s
+commit paths would guard the parts where mistakes cost money. Needs an
 XCUITest/unit target in the Xcode project or moving that logic into SateCore.
 
-### 9. Smaller items
+### 8. Smaller items
 - `JSONLFile.shortWriteInjector` is an `internal` test seam added to prove two
   crash-safety fixes (ENOSPC is process-global and unusable in a parallel test
-  suite). It is invisible to the app and costs one nil check per line written —
-  keep it or drop it with those two tests.
-- `MockGatewayClient` triggers its error/truncate paths on those words appearing
+  suite). Invisible to the app, one nil check per line — keep it or drop it with
+  those two tests.
+- `MockGatewayClient` triggers error/truncate paths on those words appearing
   anywhere in the prompt. Intentional for demos, surprising otherwise.
-- No app icon; `ASSETCATALOG_COMPILER_APPICON_NAME` points at a catalog that
-  does not exist yet.
 - iPad multi-scene (two windows on one conversation) is designed for — the store
   is an actor and the JSONL is append-only — but untested.
-- Conversation list at scale: `index.json` avoids parsing bodies, but nothing
-  has been tried with hundreds of conversations.
-- v2 hooks deliberately left in place: tool-execution loop (`StreamEvent`
-  already carries `toolCallDelta`), images (`ContentPart` is an array),
+- Conversation list at scale: `index.json` avoids parsing bodies, but nothing has
+  been tried with hundreds of conversations.
+- v2 hooks deliberately left in place: images (`ContentPart` is an array),
   compaction (`ContextBuilder` is a seam), iCloud sync.
 
-## Model selection (added after the overnight run)
+## Done since the original handoff
 
-The free-form model text fields are now a picker over `ModelCatalog`
-(`Sources/SateCore/Settings/ModelCatalog.swift`), which lists Cloudflare's own
-`@cf` Workers AI models. Those run on Cloudflare's infrastructure, so they need
-no BYOK provider key and no Unified Billing fall-through — they are the only
-models that work on a fresh install with nothing but an account id and a token.
-
-| Model | id | Context |
-|---|---|---|
-| Gemma 4 26B (Google) | `@cf/google/gemma-4-26b-a4b-it` | 256,000 |
-| Qwen 3.8 27B (Alibaba) | `@cf/qwen/qwen3.8-27b` | 262,144 |
-| Qwen3 30B A3B (Alibaba) | `@cf/qwen/qwen3-30b-a3b-fp8` | 32,768 |
-| Llama 3.3 70B Fast (Meta) | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | 24,000 |
-
-Defaults moved to Gemma 4 for chat and Llama 3.3 70B Fast for titling. The
-picker keeps a **Custom** row, so every other `provider/model` string the gateway
-resolves is still reachable; a stored value outside the catalog opens the field
-already in custom mode. A catalog model also supplies its real context window as
-the default input budget, so `ContextBuilder` stops assuming 100k for everything.
-
-Two Cloudflare details this surfaced, both now handled:
-
-- **The two hosts spell Workers AI models differently.** REST takes the bare
-  `@cf/author/model`; the compat host wants `workers-ai/@cf/author/model`. The
-  catalog stores the REST form and `GatewayRoute.wireModel(_:)` rewrites it once
-  the route is known.
-- **Workers AI on REST requires `cf-aig-gateway-id`.** Other providers only need
-  it to select a non-default gateway. The client now falls back to `default` for
-  `@cf` models when no gateway id is configured, so a fresh install works.
-
-The catalog is static on purpose: there is no unauthenticated endpoint that
-enumerates gateway-reachable models, and a settings screen that can fail to
-populate is worse than a short list plus free-form entry.
-
-## Web search
-
-Not implemented. The spec is
-[`docs/superpowers/specs/2026-08-26-web-search.md`](docs/superpowers/specs/2026-08-26-web-search.md):
-a client-side tool loop over the existing `toolCallDelta` plumbing, with a
-`SearchProvider` protocol (Brave first) and hard round/result caps. It carries
-four open questions the implementer has to answer first — chiefly whether the
-`@cf` models hold the tool contract, and whether one more device-side secret is
-acceptable given "provider keys never on device".
+Web search (Tavily `SearchProvider` + `ToolRunner`, spec
+[`docs/superpowers/specs/2026-08-26-web-search.md`](docs/superpowers/specs/2026-08-26-web-search.md));
+in-band `<think>` reasoning parsing fix (bug #13); `ThinkingPolicy`/`ThinkingLevel`
+selector; `ModelCatalog` picker with real context windows and the REST/compat
+model-name rewrite; app icon; Keychain reads moved off the main thread and
+header-line `F_FULLFSYNC` skipped (see bug #12); structured `OSLog` logging;
+AttributedString caching; launch screen.
