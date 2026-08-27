@@ -52,7 +52,7 @@ public actor ToolRunner {
     public static let maxResultsPerCall = 8
     public static let defaultResultsPerCall = 5
 
-    nonisolated(unsafe) private static let iso8601Formatter = ISO8601DateFormatter()
+    private nonisolated(unsafe) static let iso8601Formatter = ISO8601DateFormatter()
 
     private let searchProvider: (any SearchProvider)?
     private let maxRounds: Int

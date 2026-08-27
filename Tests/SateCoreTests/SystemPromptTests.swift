@@ -70,5 +70,4 @@ struct SystemPromptTests {
         #expect(!resolved.contains(SystemPrompt.currentDateToken))
         #expect(!resolved.contains("{{"))
     }
-
 }

@@ -4,9 +4,6 @@ import SwiftUI
 ///
 /// Collapsed: a compact row of domain/site chips with an expand button.
 /// Expanded: detailed cards showing title, snippet, published date, and link.
-///
-/// Chips and buttons are navigation chrome, so they sit on Liquid Glass;
-/// message content itself remains plain.
 struct SourcesView: View {
     let sources: [SearchResult]
     @State private var isExpanded = false
@@ -43,7 +40,7 @@ struct SourcesView: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .glassEffect(.regular, in: .capsule)
+            .background(Color.secondary.opacity(0.12), in: Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(isExpanded ? "Collapse \(sources.count) sources" : "Expand \(sources.count) sources")
@@ -65,7 +62,7 @@ struct SourcesView: View {
                             }
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .glassEffect(.regular, in: .capsule)
+                            .background(Color.secondary.opacity(0.12), in: Capsule())
                         }
                         .buttonStyle(.plain)
                     }
@@ -116,7 +113,7 @@ struct SourcesView: View {
                         }
                         .padding(10)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .glassEffect(.regular, in: .rect(cornerRadius: 12))
+                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
                     }
                     .buttonStyle(.plain)
                 }

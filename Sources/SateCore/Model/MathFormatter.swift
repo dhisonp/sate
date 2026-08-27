@@ -71,7 +71,7 @@ public enum MathFormatter: Sendable {
         result = MathParser.replaceMatches(in: result, regex: bracketRegex) { formatEquation($0) }
         result = MathParser.replaceMatches(in: result, regex: envRegex, groupIndex: 0) { formatEquation($0) }
         result = MathParser.replaceMatches(in: result, regex: parenRegex) { formatEquation($0) }
-        
+
         result = MathParser.replaceMatches(in: result, regex: dollarRegex) { match in
             if match.allSatisfy({ $0.isNumber || $0 == "." || $0 == "," }) {
                 return "$\(match)$"

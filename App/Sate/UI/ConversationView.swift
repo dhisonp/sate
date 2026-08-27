@@ -134,17 +134,19 @@ struct ConversationView: View {
                 geometry.visibleRect.maxY >= geometry.contentSize.height - 24
             } action: { _, atBottom in
                 isAtBottom = atBottom
-                if atBottom {
+                if isUserDriven {
+                    if !atBottom {
+                        isPinned = false
+                    }
+                } else if atBottom {
                     isPinned = true
-                } else if isUserDriven {
-                    isPinned = false
                 }
             }
             // Follow new output smoothly without lag or rubber-banding when pinned.
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 geometry.contentSize.height
             } action: { _, _ in
-                if isPinned {
+                if isPinned && !isUserDriven {
                     proxy.scrollTo(bottomAnchor, anchor: .bottom)
                 }
             }
@@ -165,7 +167,8 @@ struct ConversationView: View {
                 }
             }
             .onChange(of: vm.phase) { oldPhase, newPhase in
-                if isPinned, oldPhase == .streaming || oldPhase == .awaitingFirstToken || oldPhase.isBusy, !newPhase.isBusy {
+                let wasBusy = oldPhase == .streaming || oldPhase == .awaitingFirstToken || oldPhase.isBusy
+                if isPinned, !isUserDriven, wasBusy, !newPhase.isBusy {
                     proxy.scrollTo(bottomAnchor, anchor: .bottom)
                 }
             }

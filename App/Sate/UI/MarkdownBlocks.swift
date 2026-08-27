@@ -52,6 +52,7 @@ struct MarkdownBlock: Identifiable, Hashable {
         self.cachedTableRowsAttributed = cachedTableRowsAttributed
     }
 
+    @MainActor
     mutating func precomputeAttributed(sources: [SearchResult]? = nil) {
         switch kind {
         case let .paragraph(text), let .heading(_, text):
@@ -106,8 +107,6 @@ struct MarkdownFence: Hashable {
         return body.dropFirst(run.count).allSatisfy { $0 == " " || $0 == "\t" }
     }
 }
-
-
 
 // MARK: - Block parsing
 
@@ -505,7 +504,18 @@ enum MarkdownBlockParser {
 
 // MARK: - Inline rendering
 
+@MainActor
 enum MarkdownInline {
+    private struct CacheKey: Hashable {
+        let source: String
+        let sourcesCount: Int
+    }
+
+    private static let limit = 300
+    private static var cache: [CacheKey: AttributedString] = [:]
+    private static var order: [CacheKey] = []
+    private static var head = 0
+
     private static let citationRegex = try? NSRegularExpression(
         pattern: #"(?<!\[|\`|\\)\[([1-9][0-9]?)\](?!\(|\`|\])"#
     )
@@ -518,6 +528,11 @@ enum MarkdownInline {
     /// half-written emphasis run or a stray bracket from a partial stream renders
     /// as literal text rather than blanking the message.
     static func attributed(_ source: String, sources: [SearchResult]? = nil) -> AttributedString {
+        let key = CacheKey(source: source, sourcesCount: sources?.count ?? 0)
+        if let cached = cache[key] {
+            return cached
+        }
+
         let preparedMath = MathFormatter.formatText(source)
         let prepared = prepareCitations(preparedMath, sources: sources)
         var options = AttributedString.MarkdownParsingOptions()
@@ -533,14 +548,46 @@ enum MarkdownInline {
                 attr[run.range].backgroundColor = Color.secondary.opacity(0.12)
             }
         }
+
+        cache[key] = attr
+        order.append(key)
+        if order.count - head > limit {
+            cache.removeValue(forKey: order[head])
+            head += 1
+            if head > limit {
+                order.removeFirst(head)
+                head = 0
+            }
+        }
+
         return attr
     }
 
     /// Formats a standalone equation for rendering in a math block.
     static func attributedMath(_ equation: String) -> AttributedString {
+        let key = CacheKey(source: "math:\(equation)", sourcesCount: 0)
+        if let cached = cache[key] {
+            return cached
+        }
         var attr = AttributedString(equation)
         attr.font = .appSans(size: 17, weight: .regular)
+        cache[key] = attr
+        order.append(key)
+        if order.count - head > limit {
+            cache.removeValue(forKey: order[head])
+            head += 1
+            if head > limit {
+                order.removeFirst(head)
+                head = 0
+            }
+        }
         return attr
+    }
+
+    static func clear() {
+        cache.removeAll(keepingCapacity: false)
+        order.removeAll(keepingCapacity: false)
+        head = 0
     }
 
     /// Links `[n]` citation markers to their corresponding source URLs (R4.4).
@@ -620,6 +667,7 @@ enum MarkdownCache {
         storage.removeAll(keepingCapacity: false)
         order.removeAll(keepingCapacity: false)
         head = 0
+        MarkdownInline.clear()
     }
 }
 
