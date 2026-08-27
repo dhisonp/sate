@@ -3,7 +3,7 @@ import SwiftUI
 /// Navigation is a typed path so routes stay value types and the demo hook can
 /// push a screen directly.
 enum SateRoute: Hashable {
-    case chat(UUID)
+    case conversation(UUID)
     case settings
 }
 
@@ -34,10 +34,10 @@ private struct RootView: View {
             ConversationListView(path: $path)
                 .navigationDestination(for: SateRoute.self) { route in
                     switch route {
-                    case let .chat(id):
+                    case let .conversation(id):
                         // The view model is owned by the environment, not by this
                         // view: navigating back must not cancel a live generation.
-                        ChatView(vm: env.viewModel(for: id))
+                        ConversationView(vm: env.viewModel(for: id))
                     case .settings:
                         SettingsView()
                     }
@@ -67,7 +67,7 @@ private struct RootView: View {
             return
         }
         guard let id = await env.newConversation() else { return }
-        path = [.chat(id)]
+        path = [.conversation(id)]
         let vm = env.viewModel(for: id)
         await vm.load()
         vm.input = environmentValues["SATE_DEMO_PROMPT"]

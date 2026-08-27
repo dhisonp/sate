@@ -1,11 +1,16 @@
 import Foundation
 
-/// Executes web searches against the Tavily Search API.
-///
 /// Authentication uses a single API key stored in the Keychain.
 /// Requests are sent as POST to `https://api.tavily.com/search` with an 8.0s timeout.
 public final class TavilySearchProvider: SearchProvider, Sendable {
     public static let defaultEndpoint = URL(string: "https://api.tavily.com/search")!
+
+    nonisolated(unsafe) private static let iso8601Formatter = ISO8601DateFormatter()
+    nonisolated(unsafe) private static let iso8601FractionalFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
 
     private let apiKey: String
     private let session: URLSession
@@ -142,12 +147,10 @@ public final class TavilySearchProvider: SearchProvider, Sendable {
     }
 
     private static func parseDate(_ dateString: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        if let date = formatter.date(from: dateString) {
+        if let date = iso8601Formatter.date(from: dateString) {
             return date
         }
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: dateString)
+        return iso8601FractionalFormatter.date(from: dateString)
     }
 
     private static func extractSiteName(from urlString: String) -> String? {

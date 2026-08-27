@@ -1,8 +1,6 @@
 import SwiftUI
 
-/// The in-flight assistant response.
-///
-/// This is the only view in the app that observes `Draft`. `ChatView`'s body must
+/// This is the only view in the app that observes `Draft`. `ConversationView`'s body must
 /// never read `draft.text`: `@Observable` tracks reads per-body, so a parent that
 /// touched the draft would re-evaluate the entire transcript at the flush cadence
 /// (~60/s, with tokens arriving at up to 300/s).
@@ -16,7 +14,8 @@ struct StreamingMessageView: View {
     var showThinking: Bool = true
 
     var body: some View {
-        let blocks = MarkdownBlockParser.parse(draft.text)
+        let text = draft.text
+        let blocks = text.isEmpty ? [] : MarkdownBlockParser.parse(text)
 
         if !draft.isActive && blocks.isEmpty && (!showThinking || draft.reasoning.isEmpty) {
             EmptyView()
@@ -27,7 +26,7 @@ struct StreamingMessageView: View {
                         .equatable()
                 }
 
-                if draft.text.isEmpty {
+                if text.isEmpty {
                     ThinkingIndicator(draft: draft, isThinking: isThinking)
                         .padding(.vertical, 2)
                 } else {
@@ -87,7 +86,7 @@ private struct StreamingReasoningView: View, Equatable {
 /// "Thinking… (Ns)". Driven by `draft.elapsedSeconds` (a 1 Hz timer owned by the
 /// view model), never by socket activity — a model that is silently reasoning
 /// still has to look alive. Isolated in its own view so the 1 Hz tick does not
-/// invalidate `ChatView`.
+/// invalidate `ConversationView`.
 struct ThinkingIndicator: View {
     let draft: Draft
     var isThinking: Bool = true

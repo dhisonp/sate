@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Composer + Expandable Config Bubble + Send/Stop (R4.1).
+/// Composer + Send/Stop (R4.1).
 ///
-/// Send/Stop state deliberately lives here rather than in `ChatView`: this view's
+/// Send/Stop state deliberately lives here rather than in `ConversationView`: this view's
 /// body is the only place that reads `vm.phase` for the button, so a phase change
 /// re-evaluates this control instead of the whole transcript.
 ///
@@ -10,7 +10,7 @@ import SwiftUI
 /// while a response streams, and the text survives a failed send because the
 /// draft lives in the view model, not in local `@State`.
 struct InputBar: View {
-    @Bindable var vm: ChatViewModel
+    @Bindable var vm: ConversationViewModel
     @FocusState private var isFocused: Bool
 
     private var isBusy: Bool {

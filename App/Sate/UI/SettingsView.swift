@@ -1,8 +1,6 @@
 import OSLog
 import SwiftUI
 
-/// Everything the user can configure.
-///
 /// API tokens are **write-only** here: they live in the Keychain and are never
 /// read back into the UI. The fields show whether a token is stored, never its value.
 struct SettingsView: View {

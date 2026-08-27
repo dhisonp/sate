@@ -6,7 +6,7 @@ import UIKit
 /// `Equatable` so that a transcript re-render (new message appended, branch
 /// switched) does not re-measure every earlier bubble — markdown block layout is
 /// the expensive part and it is pure w.r.t. the message value.
-struct MessageBubble: View, Equatable {
+struct TurnView: View, Equatable {
     let message: Message
     /// All messages sharing this message's parent, in append order. More than one
     /// means the user forked here and gets "‹ 2/3 ›" navigation.
@@ -15,7 +15,7 @@ struct MessageBubble: View, Equatable {
     let onEdit: (Message) -> Void
     let onSwitchBranch: (UUID) -> Void
 
-    nonisolated static func == (lhs: MessageBubble, rhs: MessageBubble) -> Bool {
+    nonisolated static func == (lhs: TurnView, rhs: TurnView) -> Bool {
         lhs.message == rhs.message && lhs.siblings == rhs.siblings && lhs.showThinking == rhs.showThinking
     }
 

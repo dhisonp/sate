@@ -36,7 +36,7 @@ struct DebugPanel: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         // Chrome, not content: it floats in the bottom inset above the
-        // transcript, inside `ChatView`'s `GlassEffectContainer`.
+        // transcript, inside `ConversationView`'s `GlassEffectContainer`.
         .glassEffect(.regular, in: .rect(cornerRadius: 22))
     }
 

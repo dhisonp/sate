@@ -4,7 +4,7 @@ import OSLog
 /// The send/stream state machine (R2.8). `awaitingFirstToken` is separate from
 /// `sending` because that is the only window where "Thinking… (Ns)" is honest —
 /// the request is accepted and the model is silent.
-enum ChatPhase: Equatable {
+enum ConversationPhase: Equatable {
     case idle
     case sending
     case searching(String)
@@ -24,10 +24,10 @@ enum ChatPhase: Equatable {
 }
 
 /// One open conversation, projected for the UI. Owns no networking and no files:
-/// it drives a `ConversationSession` and reads back what that session committed.
+/// it drives a `ConversationRunner` and reads back what that session committed.
 @MainActor
 @Observable
-final class ChatViewModel {
+final class ConversationViewModel {
     let conversationID: UUID
 
     /// Committed turns on the current branch only. The in-flight response is in
@@ -36,7 +36,7 @@ final class ChatViewModel {
     /// Filtered visible messages cached to avoid O(n) re-filtering on every view body evaluation.
     private(set) var visibleMessages: [Message] = []
     let draft = Draft()
-    private(set) var phase: ChatPhase = .idle
+    private(set) var phase: ConversationPhase = .idle
     var input: String = ""
     var isSearchEnabled: Bool
     var thinkingLevel: ThinkingLevel
@@ -56,7 +56,7 @@ final class ChatViewModel {
     /// Everything below is machinery the UI never reads; excluded so a mutation
     /// cannot invalidate a view.
     @ObservationIgnored private let store: ConversationStore
-    @ObservationIgnored private let session: ConversationSession
+    @ObservationIgnored private let session: ConversationRunner
     /// The environment owns this view model, so the back-reference is unowned.
     @ObservationIgnored private unowned let environment: AppEnvironment
     /// Full tree, kept in sync incrementally, so sibling navigation does not
@@ -80,7 +80,7 @@ final class ChatViewModel {
     init(
         conversationID: UUID,
         store: ConversationStore,
-        session: ConversationSession,
+        session: ConversationRunner,
         environment: AppEnvironment
     ) {
         self.conversationID = conversationID

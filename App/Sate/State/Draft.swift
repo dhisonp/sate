@@ -1,8 +1,6 @@
 import Foundation
 
-/// The in-flight assistant response.
-///
-/// Deliberately a tiny leaf object separate from `ChatViewModel` (R2.8): it is
+/// Deliberately a tiny leaf object separate from `ConversationViewModel` (R2.8): it is
 /// mutated on every coalescer flush, and a parent view that reads `phase` or
 /// `messages` must not re-evaluate its `body` 60 times a second because of it.
 /// Only `StreamingMessageView` observes this.
@@ -10,7 +8,7 @@ import Foundation
 @Observable
 final class Draft {
     /// Committed-so-far assistant text. Never a `Message` until the generation
-    /// terminates — see `ConversationSession`.
+    /// terminates — see `ConversationRunner`.
     var text: String = ""
     /// `reasoning_content` / `reasoning`, shown collapsed. Kept apart from `text`
     /// because it is display-only and is never replayed to the model.
@@ -18,7 +16,7 @@ final class Draft {
     var isActive: Bool = false
     var startedAt: Date?
     var firstTokenAt: Date?
-    /// Ticked ~1/s by `ChatViewModel` so "Thinking… (12s)" is driven by a timer
+    /// Ticked ~1/s by `ConversationViewModel` so "Thinking… (12s)" is driven by a timer
     /// rather than by socket traffic — the whole point is that no bytes arrive.
     var elapsedSeconds: Int = 0
 

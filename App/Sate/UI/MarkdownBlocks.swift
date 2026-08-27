@@ -107,96 +107,7 @@ struct MarkdownFence: Hashable {
     }
 }
 
-// MARK: - Paragraph splitting (streaming)
 
-enum MarkdownParagraphs {
-    /// Splits text into paragraphs on blank lines, skipping blank lines inside
-    /// a code fence or math block. `StreamingMessageView` freezes every paragraph but the
-    /// last, so a naive split would tear a code or math block apart the moment it
-    /// contained an empty line.
-    ///
-    /// Deliberately allocation-light: it only materializes a `String` for lines
-    /// that could plausibly be a fence, because this runs on every token flush.
-    static func split(_ text: String) -> [String] {
-        var paragraphs: [String] = []
-        var current: [Substring] = []
-        var openFence: MarkdownFence?
-        var inMathBlock = false
-        var mathEndMarker: String?
-
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            if let fence = openFence {
-                current.append(line)
-                if fence.closes(line) {
-                    openFence = nil
-                }
-                continue
-            }
-            if inMathBlock {
-                current.append(line)
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if let endMarker = mathEndMarker, trimmed.hasSuffix(endMarker) {
-                    inMathBlock = false
-                    mathEndMarker = nil
-                }
-                continue
-            }
-            let leading = line.first
-            if leading == "`" || leading == "~" || leading == " " || leading == "\t" {
-                if let fence = MarkdownFence.opener(line) {
-                    openFence = fence
-                    current.append(line)
-                    continue
-                }
-            }
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("$$"), !trimmed.dropFirst(2).hasSuffix("$$") {
-                inMathBlock = true
-                mathEndMarker = "$$"
-                current.append(line)
-                continue
-            }
-            if trimmed.hasPrefix("\\["), !trimmed.hasSuffix("\\]") {
-                inMathBlock = true
-                mathEndMarker = "\\]"
-                current.append(line)
-                continue
-            }
-            if trimmed.hasPrefix("\\begin{"), let env = extractEnvironmentName(trimmed), isMathEnvironment(env) {
-                let endMarker = "\\end{\(env)}"
-                if !trimmed.contains(endMarker) {
-                    inMathBlock = true
-                    mathEndMarker = endMarker
-                    current.append(line)
-                    continue
-                }
-            }
-            if line.allSatisfy({ $0 == " " || $0 == "\t" || $0 == "\r" }) {
-                if !current.isEmpty {
-                    paragraphs.append(current.joined(separator: "\n"))
-                    current.removeAll(keepingCapacity: true)
-                }
-                continue
-            }
-            current.append(line)
-        }
-        if !current.isEmpty {
-            paragraphs.append(current.joined(separator: "\n"))
-        }
-        return paragraphs
-    }
-
-    private static func extractEnvironmentName(_ line: String) -> String? {
-        guard let start = line.range(of: "\\begin{")?.upperBound else { return nil }
-        guard let end = line[start...].firstIndex(of: "}") else { return nil }
-        return String(line[start ..< end])
-    }
-
-    private static func isMathEnvironment(_ name: String) -> Bool {
-        let mathEnvs = ["equation", "equation*", "align", "align*", "aligned", "gather", "gather*", "multline", "multline*", "matrix", "pmatrix", "bmatrix", "vmatrix", "Vmatrix", "cases"]
-        return mathEnvs.contains(name)
-    }
-}
 
 // MARK: - Block parsing
 
@@ -489,9 +400,10 @@ enum MarkdownBlockParser {
         return String(line[start ..< end])
     }
 
+    private static let mathEnvironments: Set<String> = ["equation", "equation*", "align", "align*", "aligned", "gather", "gather*", "multline", "multline*", "matrix", "pmatrix", "bmatrix", "vmatrix", "Vmatrix", "cases"]
+
     private static func isMathEnvironment(_ name: String) -> Bool {
-        let mathEnvs = ["equation", "equation*", "align", "align*", "aligned", "gather", "gather*", "multline", "multline*", "matrix", "pmatrix", "bmatrix", "vmatrix", "Vmatrix", "cases"]
-        return mathEnvs.contains(name)
+        return mathEnvironments.contains(name)
     }
 
     private static func parseTableRow(_ line: Substring) -> [String] {
@@ -594,6 +506,10 @@ enum MarkdownBlockParser {
 // MARK: - Inline rendering
 
 enum MarkdownInline {
+    private static let citationRegex = try? NSRegularExpression(
+        pattern: #"(?<!\[|\`|\\)\[([1-9][0-9]?)\](?!\(|\`|\])"#
+    )
+
     /// `.inlineOnlyPreservingWhitespace` is required: the default `.full` syntax
     /// collapses newlines and hard-wraps, which destroys the line structure of a
     /// paragraph that the block parser already decided to keep together.
@@ -631,9 +547,7 @@ enum MarkdownInline {
     private static func prepareCitations(_ text: String, sources: [SearchResult]?) -> String {
         guard let sources, !sources.isEmpty else { return text }
         // Match [1], [2], etc. that are not already markdown links or code spans
-        guard let regex = try? NSRegularExpression(
-            pattern: #"(?<!\[|\`|\\)\[([1-9][0-9]?)\](?!\(|\`|\])"#
-        ) else {
+        guard let regex = citationRegex else {
             return text
         }
         let range = NSRange(text.startIndex..., in: text)
@@ -835,7 +749,8 @@ struct MarkdownBlockView: View, Equatable {
     }
 }
 
-/// Renders committed markdown.
+/// Blocks are parsed once and cached per message. This view only renders
+/// the cached result, so scrolling through a long transcript does not re-parse.
 struct MarkdownBlocksView: View, Equatable {
     let source: String
     var sources: [SearchResult]?

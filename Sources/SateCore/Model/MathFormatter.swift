@@ -1,7 +1,5 @@
 import Foundation
 
-/// Formats LaTeX mathematical expressions and notation into clean, legible Unicode math.
-///
 /// Supports inline math (`$ ... $`, `\( ... \)`), display math (`$$ ... $$`, `\[ ... \]`),
 /// LaTeX environments (`\begin{equation}`, `\begin{align}`, `\begin{matrix}`, `\begin{cases}`),
 /// and un-delimited mathematical expressions. Foundation-only, zero dependencies.
@@ -15,6 +13,26 @@ public enum MathFormatter: Sendable {
         "\\text{", "\\frac{", "\\sqrt", "\\left(", "\\sum",
         "\\int", "\\mathbf{", "\\mathcal{", "\\alpha", "\\beta", "\\partial", "\\begin{",
     ]
+
+    private static let displayRegex = try! NSRegularExpression(
+        pattern: #"\$\$(.+?)\$\$"#,
+        options: [.dotMatchesLineSeparators]
+    )
+    private static let bracketRegex = try! NSRegularExpression(
+        pattern: #"\\\[(.+?)\\\]"#,
+        options: [.dotMatchesLineSeparators]
+    )
+    private static let envRegex = try! NSRegularExpression(
+        pattern: #"\\begin\{(equation\*?|align\*?|aligned|gather\*?|matrix|pmatrix|bmatrix|vmatrix|Vmatrix|cases)\}(.+?)\\end\{\1\}"#,
+        options: [.dotMatchesLineSeparators]
+    )
+    private static let parenRegex = try! NSRegularExpression(
+        pattern: #"\\\((.+?)\\\)"#,
+        options: [.dotMatchesLineSeparators]
+    )
+    private static let dollarRegex = try! NSRegularExpression(
+        pattern: #"(?<!\\|\$)\$(?!\s|\$)([^\$\n]+?)(?<!\s|\$)\$(?!\$)"#
+    )
 
     // MARK: - Public API
 
@@ -49,43 +67,16 @@ public enum MathFormatter: Sendable {
     public static func formatText(_ text: String) -> String {
         var result = text
 
-        if let displayRegex = try? NSRegularExpression(
-            pattern: #"\$\$(.+?)\$\$"#,
-            options: [.dotMatchesLineSeparators]
-        ) {
-            result = MathParser.replaceMatches(in: result, regex: displayRegex) { formatEquation($0) }
-        }
-
-        if let bracketRegex = try? NSRegularExpression(
-            pattern: #"\\\[(.+?)\\\]"#,
-            options: [.dotMatchesLineSeparators]
-        ) {
-            result = MathParser.replaceMatches(in: result, regex: bracketRegex) { formatEquation($0) }
-        }
-
-        let envPattern =
-            #"\\begin\{(equation\*?|align\*?|aligned|gather\*?|matrix|pmatrix|bmatrix|vmatrix|Vmatrix|cases)\}"# +
-            #"(.+?)\\end\{\1\}"#
-        if let envRegex = try? NSRegularExpression(pattern: envPattern, options: [.dotMatchesLineSeparators]) {
-            result = MathParser.replaceMatches(in: result, regex: envRegex, groupIndex: 0) { formatEquation($0) }
-        }
-
-        if let parenRegex = try? NSRegularExpression(
-            pattern: #"\\\((.+?)\\\)"#,
-            options: [.dotMatchesLineSeparators]
-        ) {
-            result = MathParser.replaceMatches(in: result, regex: parenRegex) { formatEquation($0) }
-        }
-
-        if let dollarRegex = try? NSRegularExpression(
-            pattern: #"(?<!\\|\$)\$(?!\s|\$)([^\$\n]+?)(?<!\s|\$)\$(?!\$)"#
-        ) {
-            result = MathParser.replaceMatches(in: result, regex: dollarRegex) { match in
-                if match.allSatisfy({ $0.isNumber || $0 == "." || $0 == "," }) {
-                    return "$\(match)$"
-                }
-                return formatEquation(match)
+        result = MathParser.replaceMatches(in: result, regex: displayRegex) { formatEquation($0) }
+        result = MathParser.replaceMatches(in: result, regex: bracketRegex) { formatEquation($0) }
+        result = MathParser.replaceMatches(in: result, regex: envRegex, groupIndex: 0) { formatEquation($0) }
+        result = MathParser.replaceMatches(in: result, regex: parenRegex) { formatEquation($0) }
+        
+        result = MathParser.replaceMatches(in: result, regex: dollarRegex) { match in
+            if match.allSatisfy({ $0.isNumber || $0 == "." || $0 == "," }) {
+                return "$\(match)$"
             }
+            return formatEquation(match)
         }
 
         return MathParser.formatUnDelimitedMath(result)
@@ -484,23 +475,22 @@ private enum MathParser {
         }.joined(separator: "\n")
     }
 
+    private static let subRegex = try! NSRegularExpression(pattern: #"([a-zA-Z])_([a-zA-Z0-9])\b"#)
+    private static let supRegex = try! NSRegularExpression(pattern: #"([a-zA-Z0-9])\^([a-zA-Z0-9])\b"#)
+
     private static func formatInlineSubscriptsAndSuperscripts(_ line: String) -> String {
         var result = line
-        if let subRegex = try? NSRegularExpression(pattern: #"([a-zA-Z])_([a-zA-Z0-9])\b"#) {
-            result = replaceMatches(in: result, regex: subRegex, groupIndex: 0) { match in
-                let base = match.prefix(1)
-                let sub = match.suffix(1)
-                return "\(base)\(MathFormatter.toSubscript(String(sub)))"
-            }
+        result = replaceMatches(in: result, regex: subRegex, groupIndex: 0) { match in
+            let base = match.prefix(1)
+            let sub = match.suffix(1)
+            return "\(base)\(MathFormatter.toSubscript(String(sub)))"
         }
-        if let supRegex = try? NSRegularExpression(pattern: #"([a-zA-Z0-9])\^([a-zA-Z0-9])\b"#) {
-            result = replaceMatches(in: result, regex: supRegex, groupIndex: 0) { match in
-                let parts = match.split(separator: "^")
-                if parts.count == 2 {
-                    return "\(parts[0])\(MathFormatter.toSuperscript(String(parts[1])))"
-                }
-                return match
+        result = replaceMatches(in: result, regex: supRegex, groupIndex: 0) { match in
+            let parts = match.split(separator: "^")
+            if parts.count == 2 {
+                return "\(parts[0])\(MathFormatter.toSuperscript(String(parts[1])))"
             }
+            return match
         }
         return result
     }
@@ -530,10 +520,7 @@ private enum MathParser {
     }
 
     private static func cleanSpaces(_ text: String) -> String {
-        var result = text
-        while result.contains("  ") {
-            result = result.replacingOccurrences(of: "  ", with: " ")
-        }
+        var result = text.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
         result = result.replacingOccurrences(of: " ( ", with: " (")
         result = result.replacingOccurrences(of: " ) ", with: ") ")
         result = result.replacingOccurrences(of: "( ", with: "(")
