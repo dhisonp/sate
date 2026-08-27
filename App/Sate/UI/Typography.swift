@@ -26,7 +26,27 @@ enum AppFont {
 }
 
 extension Font.TextStyle {
-    var defaultPointSize: CGFloat {
+    /// Point sizes for sans-serif (Atkinson Hyperlegible Next), slightly bumped
+    /// for enhanced legibility and generous character distinction.
+    var sansPointSize: CGFloat {
+        switch self {
+        case .largeTitle: 36
+        case .title: 30
+        case .title2: 24
+        case .title3: 21
+        case .headline: 18
+        case .body: 18
+        case .callout: 17
+        case .subheadline: 16
+        case .footnote: 14
+        case .caption: 13
+        case .caption2: 12
+        @unknown default: 18
+        }
+    }
+
+    /// Point sizes for monospaced (Atkinson Hyperlegible Mono), adhering to standard HIG metrics.
+    var monoPointSize: CGFloat {
         switch self {
         case .largeTitle: 34
         case .title: 28
@@ -41,6 +61,10 @@ extension Font.TextStyle {
         case .caption2: 11
         @unknown default: 17
         }
+    }
+
+    var defaultPointSize: CGFloat {
+        sansPointSize
     }
 
     /// Line spacing in points following accessible typography standards tuned
@@ -68,11 +92,11 @@ extension View {
 
 extension Font {
     static func appSans(_ textStyle: Font.TextStyle, weight: Font.Weight = .regular) -> Font {
-        appSans(size: textStyle.defaultPointSize, weight: weight, relativeTo: textStyle)
+        appSans(size: textStyle.sansPointSize, weight: weight, relativeTo: textStyle)
     }
 
     static func appMono(_ textStyle: Font.TextStyle, weight: Font.Weight = .regular) -> Font {
-        appMono(size: textStyle.defaultPointSize, weight: weight, relativeTo: textStyle)
+        appMono(size: textStyle.monoPointSize, weight: weight, relativeTo: textStyle)
     }
 
     static func appSans(size: CGFloat, weight: Font.Weight = .regular, relativeTo: Font.TextStyle = .body) -> Font {
