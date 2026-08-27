@@ -1,7 +1,8 @@
 import SwiftUI
 import UIKit
 
-/// Mathematical equations live in their own horizontal `ScrollView` with a copy LaTeX button.
+/// Equations render in an isolated horizontal ScrollView to prevent wide
+/// formulas from expanding the transcript container or causing horizontal jank.
 struct MathBlockView: View {
     let equation: String
     let raw: String

@@ -1,6 +1,5 @@
 import Foundation
 
-/// A tool call requested by the model.
 public struct ToolCall: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     public var name: String
@@ -52,6 +51,8 @@ public actor ToolRunner {
     public static let maxCallsPerRound = 4
     public static let maxResultsPerCall = 8
     public static let defaultResultsPerCall = 5
+
+    nonisolated(unsafe) private static let iso8601Formatter = ISO8601DateFormatter()
 
     private let searchProvider: (any SearchProvider)?
     private let maxRounds: Int
@@ -242,7 +243,7 @@ public actor ToolRunner {
                 item["site"] = site
             }
             if let published = result.publishedAt {
-                item["published_at"] = ISO8601DateFormatter().string(from: published)
+                item["published_at"] = iso8601Formatter.string(from: published)
             }
             return item
         }

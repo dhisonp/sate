@@ -20,7 +20,8 @@ public struct ReasoningTagParser: Sendable {
 
     public init() {}
 
-    /// Processes an incoming text delta, returning separated text and reasoning fragments.
+    /// Processes text incrementally across chunk boundaries, splitting out
+    /// reasoning tags and buffering partial opening/closing tags across chunk boundaries.
     public mutating func process(text: String) -> (text: String, reasoning: String) {
         guard !text.isEmpty || !buffer.isEmpty else { return ("", "") }
 
@@ -38,7 +39,7 @@ public struct ReasoningTagParser: Sendable {
                     state = .thinking(tag: openMatch.tag)
                     input = String(input[openMatch.range.upperBound...])
                 } else {
-                    let (safeText, candidate) = splitCandidatePrefix(input, prefixes: openTagPrefixes)
+                    let (safeText, candidate) = splitCandidatePrefix(input, prefixes: Self.openTagPrefixes)
                     outText += safeText
                     buffer = candidate
                     return (outText, outReasoning)
@@ -59,7 +60,7 @@ public struct ReasoningTagParser: Sendable {
                     input = String(remaining)
                 } else {
                     let (safeReasoning, candidate) = splitCandidatePrefix(
-                        input, prefixes: closeTagPrefixes(for: tag)
+                        input, prefixes: Self.closeTagPrefixesByTag[tag] ?? []
                     )
                     outReasoning += safeReasoning
                     buffer = candidate
@@ -110,25 +111,29 @@ public struct ReasoningTagParser: Sendable {
 
     private static let recognizedTags = ["think", "thought"]
 
-    private var openTagPrefixes: [String] {
+    private static let openTagPrefixes: [String] = {
         var prefixes: [String] = []
-        for tag in Self.recognizedTags {
+        for tag in recognizedTags {
             let full = "<\(tag)>"
             for len in 1 ..< full.count {
                 prefixes.append(String(full.prefix(len)))
             }
         }
         return prefixes
-    }
+    }()
 
-    private func closeTagPrefixes(for tag: String) -> [String] {
-        let full = "</\(tag)>"
-        var prefixes: [String] = []
-        for len in 1 ..< full.count {
-            prefixes.append(String(full.prefix(len)))
+    private static let closeTagPrefixesByTag: [String: [String]] = {
+        var dict: [String: [String]] = [:]
+        for tag in recognizedTags {
+            let full = "</\(tag)>"
+            var prefixes: [String] = []
+            for len in 1 ..< full.count {
+                prefixes.append(String(full.prefix(len)))
+            }
+            dict[tag] = prefixes
         }
-        return prefixes
-    }
+        return dict
+    }()
 
     private func findOpenTag(in text: String) -> TagMatch? {
         var earliest: TagMatch?

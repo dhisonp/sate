@@ -31,7 +31,7 @@ final class AppEnvironment {
     @ObservationIgnored private(set) var estimator: TokenEstimator
     @ObservationIgnored let store: ConversationStore
     /// Rebuilt whenever the account, gateway or token changes. Not observed: the
-    /// UI never reads it, only `ChatViewModel` does.
+    /// UI never reads it, only `ConversationViewModel` does.
     @ObservationIgnored private(set) var client: any LLMStreaming
 
     let isMock: Bool
@@ -45,8 +45,8 @@ final class AppEnvironment {
     /// Cached so `hasToken` never touches the Keychain from a view's `body`.
     private var cachedToken: String?
     private var cachedSearchToken: String?
-    @ObservationIgnored private var viewModels: [UUID: ChatViewModel] = [:]
-    @ObservationIgnored private var sessions: [UUID: ConversationSession] = [:]
+    @ObservationIgnored private var viewModels: [UUID: ConversationViewModel] = [:]
+    @ObservationIgnored private var sessions: [UUID: ConversationRunner] = [:]
 
     var hasToken: Bool {
         guard let cachedToken else { return false }
@@ -226,13 +226,13 @@ final class AppEnvironment {
         await delete(allIDs)
     }
 
-    func viewModel(for id: UUID) -> ChatViewModel {
+    func viewModel(for id: UUID) -> ConversationViewModel {
         if let existing = viewModels[id] {
             return existing
         }
-        let session = sessions[id] ?? ConversationSession(conversationID: id, store: store)
+        let session = sessions[id] ?? ConversationRunner(conversationID: id, store: store)
         sessions[id] = session
-        let model = ChatViewModel(
+        let model = ConversationViewModel(
             conversationID: id, store: store, session: session, environment: self
         )
         viewModels[id] = model

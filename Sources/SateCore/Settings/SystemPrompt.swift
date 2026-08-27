@@ -86,12 +86,6 @@ public enum SystemPrompt {
     - State uncertainty as a concise qualifier, not a paragraph of disclaimer.
     """
 
-    /// Backward-compatibility alias for `generalAssistant`.
-    public static let researchAssistant = generalAssistant
-
-    /// Backward-compatibility alias for `generalAssistantWithSearch`.
-    public static let researchAssistantWithSearch = generalAssistantWithSearch
-
     /// Substitutes template tokens. Called at request-build time rather than
     /// when the prompt is saved, so the date is right on every send — a prompt
     /// stored in Settings months ago must not pin the model to that day.

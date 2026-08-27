@@ -71,7 +71,7 @@ struct GenerationOutcome: Sendable {
 }
 
 /// Main-actor callbacks a generation reports through. Passed as values rather
-/// than a delegate so `ConversationSession` never holds the view model.
+/// than a delegate so `ConversationRunner` never holds the view model.
 struct GenerationEvents: Sendable {
     var started: @MainActor @Sendable (_ responseID: String?, _ model: String?) -> Void
     var searching: (@MainActor @Sendable (String) -> Void)?
@@ -100,7 +100,7 @@ struct GenerationEvents: Sendable {
 /// The task lives here, held by `AppEnvironment`, and *not* in a SwiftUI `.task`:
 /// `.task` is cancelled when the view disappears, so navigating back to the
 /// conversation list would abort a response the user already paid for.
-actor ConversationSession {
+actor ConversationRunner {
     /// Trailing-edge flush cadence. The coalescer holds back a delta that arrives
     /// less than ~16 ms after the last flush; if the model then pauses, that tail
     /// would sit unrendered until the next token. 50 ms is invisible to the eye

@@ -71,9 +71,4 @@ struct SystemPromptTests {
         #expect(!resolved.contains("{{"))
     }
 
-    @Test("Research assistant aliases match general assistant prompts for backwards compatibility")
-    func compatibilityAliasesMatch() {
-        #expect(SystemPrompt.researchAssistant == SystemPrompt.generalAssistant)
-        #expect(SystemPrompt.researchAssistantWithSearch == SystemPrompt.generalAssistantWithSearch)
-    }
 }

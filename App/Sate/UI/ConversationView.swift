@@ -8,8 +8,8 @@ import SwiftUI
 /// so one read of `draft.text` here would re-evaluate the whole `LazyVStack` at
 /// the flush cadence. Everything token-rate lives in `StreamingMessageView` and
 /// `ThinkingIndicator`; Send/Stop lives in `InputBar`.
-struct ChatView: View {
-    let vm: ChatViewModel
+struct ConversationView: View {
+    let vm: ConversationViewModel
 
     @Environment(AppEnvironment.self) private var env
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -95,7 +95,7 @@ struct ChatView: View {
                     // re-measures a mutating row on every change and the
                     // transcript visibly jumps while tokens land.
                     ForEach(vm.visibleMessages) { message in
-                        MessageBubble(
+                        TurnView(
                             message: message,
                             siblings: vm.siblings(of: message.id),
                             showThinking: env.settings.showThinking,
@@ -116,7 +116,7 @@ struct ChatView: View {
                     )
                     .transition(reduceMotion ? .identity : .opacity)
 
-                    completionFooter
+                    generationFooter
 
                     Color.clear
                         .frame(height: 1)
@@ -195,7 +195,7 @@ struct ChatView: View {
     /// Token counts come from the message's own `usage` (the gateway's final
     /// `stream_options` chunk); timings come from the trace.
     @ViewBuilder
-    private var completionFooter: some View {
+    private var generationFooter: some View {
         if !vm.phase.isBusy,
            let trace = vm.lastTrace,
            let last = vm.messages.last,
@@ -385,7 +385,7 @@ struct ChatView: View {
 
     /// VoiceOver gets one announcement per terminal phase instead of a re-read on
     /// every flush (the streaming text is hidden from the accessibility tree).
-    private func announce(_ phase: ChatPhase) {
+    private func announce(_ phase: ConversationPhase) {
         switch phase {
         case .idle:
             completionTrigger &+= 1
@@ -508,7 +508,7 @@ private struct EditMessageSheet: View {
 /// Model strings are free-form — the gateway resolves them, including dynamic
 /// routes like `dynamic/assistant` — so this is a text field, not a picker.
 private struct ModelSheet: View {
-    @Bindable var vm: ChatViewModel
+    @Bindable var vm: ConversationViewModel
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
 

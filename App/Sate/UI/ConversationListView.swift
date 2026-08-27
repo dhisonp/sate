@@ -42,7 +42,7 @@ struct ConversationListView: View {
                                 commitRename(for: summary.id)
                             }
                     } else {
-                        NavigationLink(value: SateRoute.chat(summary.id)) {
+                        NavigationLink(value: SateRoute.conversation(summary.id)) {
                             row(for: summary)
                         }
                         .contextMenu {
@@ -295,7 +295,7 @@ struct ConversationListView: View {
         Task {
             defer { isCreating = false }
             if let id = await env.newConversation() {
-                path.append(.chat(id))
+                path.append(.conversation(id))
             }
         }
     }
