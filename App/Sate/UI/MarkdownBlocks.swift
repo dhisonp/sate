@@ -23,6 +23,7 @@ struct MarkdownBlock: Identifiable, Hashable {
         /// or next block, so the table renders as in-progress rather than failing.
         case table(header: [String], rows: [[String]], isClosed: Bool)
         case rule
+        case math(equation: String, raw: String, isClosed: Bool)
     }
 
     /// Positional. Stable for a given source string, which is all `ForEach` needs
@@ -64,6 +65,8 @@ struct MarkdownBlock: Identifiable, Hashable {
             cachedTableRowsAttributed = rows.map { row in
                 row.map { MarkdownInline.attributed($0, sources: sources) }
             }
+        case let .math(equation, _, _):
+            cachedAttributed = MarkdownInline.attributedMath(equation)
         case .code, .rule:
             break
         }
@@ -107,9 +110,9 @@ struct MarkdownFence: Hashable {
 // MARK: - Paragraph splitting (streaming)
 
 enum MarkdownParagraphs {
-    /// Splits text into paragraphs on blank lines, **skipping blank lines inside
-    /// a code fence**. `StreamingMessageView` freezes every paragraph but the
-    /// last, so a naive split would tear a code block apart the moment it
+    /// Splits text into paragraphs on blank lines, skipping blank lines inside
+    /// a code fence or math block. `StreamingMessageView` freezes every paragraph but the
+    /// last, so a naive split would tear a code or math block apart the moment it
     /// contained an empty line.
     ///
     /// Deliberately allocation-light: it only materializes a `String` for lines
@@ -118,6 +121,8 @@ enum MarkdownParagraphs {
         var paragraphs: [String] = []
         var current: [Substring] = []
         var openFence: MarkdownFence?
+        var inMathBlock = false
+        var mathEndMarker: String?
 
         for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
             if let fence = openFence {
@@ -127,10 +132,41 @@ enum MarkdownParagraphs {
                 }
                 continue
             }
+            if inMathBlock {
+                current.append(line)
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if let endMarker = mathEndMarker, trimmed.hasSuffix(endMarker) {
+                    inMathBlock = false
+                    mathEndMarker = nil
+                }
+                continue
+            }
             let leading = line.first
             if leading == "`" || leading == "~" || leading == " " || leading == "\t" {
                 if let fence = MarkdownFence.opener(line) {
                     openFence = fence
+                    current.append(line)
+                    continue
+                }
+            }
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("$$"), !trimmed.dropFirst(2).hasSuffix("$$") {
+                inMathBlock = true
+                mathEndMarker = "$$"
+                current.append(line)
+                continue
+            }
+            if trimmed.hasPrefix("\\["), !trimmed.hasSuffix("\\]") {
+                inMathBlock = true
+                mathEndMarker = "\\]"
+                current.append(line)
+                continue
+            }
+            if trimmed.hasPrefix("\\begin{"), let env = extractEnvironmentName(trimmed), isMathEnvironment(env) {
+                let endMarker = "\\end{\(env)}"
+                if !trimmed.contains(endMarker) {
+                    inMathBlock = true
+                    mathEndMarker = endMarker
                     current.append(line)
                     continue
                 }
@@ -148,6 +184,17 @@ enum MarkdownParagraphs {
             paragraphs.append(current.joined(separator: "\n"))
         }
         return paragraphs
+    }
+
+    private static func extractEnvironmentName(_ line: String) -> String? {
+        guard let start = line.range(of: "\\begin{")?.upperBound else { return nil }
+        guard let end = line[start...].firstIndex(of: "}") else { return nil }
+        return String(line[start ..< end])
+    }
+
+    private static func isMathEnvironment(_ name: String) -> Bool {
+        let mathEnvs = ["equation", "equation*", "align", "align*", "aligned", "gather", "gather*", "multline", "multline*", "matrix", "pmatrix", "bmatrix", "vmatrix", "Vmatrix", "cases"]
+        return mathEnvs.contains(name)
     }
 }
 
@@ -198,17 +245,122 @@ enum MarkdownBlockParser {
                     body.append(lines[index])
                     index += 1
                 }
-                emit(.code(
-                    language: fence.info.isEmpty ? nil : fence.info,
-                    code: body.joined(separator: "\n"),
-                    isClosed: closed
-                ))
+                let rawCode = body.joined(separator: "\n")
+                if fence.info == "math" || fence.info == "latex" || fence.info == "tex" {
+                    emit(.math(
+                        equation: MathFormatter.formatEquation(rawCode),
+                        raw: rawCode,
+                        isClosed: closed
+                    ))
+                } else {
+                    emit(.code(
+                        language: fence.info.isEmpty ? nil : fence.info,
+                        code: rawCode,
+                        isClosed: closed
+                    ))
+                }
                 continue
             }
 
             if trimmed.isEmpty {
                 flushParagraph()
                 index += 1
+                continue
+            }
+
+            if trimmed.hasPrefix("$$") {
+                flushParagraph()
+                if trimmed.count > 2, trimmed.dropFirst(2).hasSuffix("$$") {
+                    let inner = String(trimmed.dropFirst(2).dropLast(2)).trimmingCharacters(in: .whitespaces)
+                    emit(.math(equation: MathFormatter.formatEquation(inner), raw: inner, isClosed: true))
+                    index += 1
+                    continue
+                } else {
+                    var body: [Substring] = []
+                    var closed = false
+                    let firstLineBody = trimmed.dropFirst(2).trimmingCharacters(in: .whitespaces)
+                    if !firstLineBody.isEmpty {
+                        body.append(Substring(firstLineBody))
+                    }
+                    index += 1
+                    while index < lines.count {
+                        let nextTrimmed = lines[index].trimmingCharacters(in: .whitespaces)
+                        if nextTrimmed.hasSuffix("$$") {
+                            let lastBody = nextTrimmed.dropLast(2).trimmingCharacters(in: .whitespaces)
+                            if !lastBody.isEmpty {
+                                body.append(Substring(lastBody))
+                            }
+                            closed = true
+                            index += 1
+                            break
+                        }
+                        body.append(lines[index])
+                        index += 1
+                    }
+                    let rawCode = body.joined(separator: "\n")
+                    emit(.math(equation: MathFormatter.formatEquation(rawCode), raw: rawCode, isClosed: closed))
+                    continue
+                }
+            }
+
+            if trimmed.hasPrefix("\\[") {
+                flushParagraph()
+                if trimmed.hasSuffix("\\]"), trimmed.count > 4 {
+                    let inner = String(trimmed.dropFirst(2).dropLast(2)).trimmingCharacters(in: .whitespaces)
+                    emit(.math(equation: MathFormatter.formatEquation(inner), raw: inner, isClosed: true))
+                    index += 1
+                    continue
+                } else {
+                    var body: [Substring] = []
+                    var closed = false
+                    let firstLineBody = trimmed.dropFirst(2).trimmingCharacters(in: .whitespaces)
+                    if !firstLineBody.isEmpty {
+                        body.append(Substring(firstLineBody))
+                    }
+                    index += 1
+                    while index < lines.count {
+                        let nextTrimmed = lines[index].trimmingCharacters(in: .whitespaces)
+                        if nextTrimmed.hasSuffix("\\]") {
+                            let lastBody = nextTrimmed.dropLast(2).trimmingCharacters(in: .whitespaces)
+                            if !lastBody.isEmpty {
+                                body.append(Substring(lastBody))
+                            }
+                            closed = true
+                            index += 1
+                            break
+                        }
+                        body.append(lines[index])
+                        index += 1
+                    }
+                    let rawCode = body.joined(separator: "\n")
+                    emit(.math(equation: MathFormatter.formatEquation(rawCode), raw: rawCode, isClosed: closed))
+                    continue
+                }
+            }
+
+            if trimmed.hasPrefix("\\begin{"), let envName = extractEnvironmentName(trimmed), isMathEnvironment(envName) {
+                flushParagraph()
+                var body: [Substring] = [line]
+                var closed = false
+                let endMarker = "\\end{\(envName)}"
+                if trimmed.contains(endMarker) {
+                    closed = true
+                    index += 1
+                } else {
+                    index += 1
+                    while index < lines.count {
+                        let currentLine = lines[index]
+                        body.append(currentLine)
+                        if currentLine.contains(endMarker) {
+                            closed = true
+                            index += 1
+                            break
+                        }
+                        index += 1
+                    }
+                }
+                let rawCode = body.joined(separator: "\n")
+                emit(.math(equation: MathFormatter.formatEquation(rawCode), raw: rawCode, isClosed: closed))
                 continue
             }
 
@@ -285,7 +437,9 @@ enum MarkdownBlockParser {
                         isThematicBreak(rowTrimmed) ||
                         heading(rowTrimmed) != nil ||
                         rowTrimmed.hasPrefix(">") ||
-                        listItem(rowTrimmed) != nil
+                        listItem(rowTrimmed) != nil ||
+                        rowTrimmed.hasPrefix("$$") ||
+                        rowTrimmed.hasPrefix("\\[")
                     {
                         closed = true
                         break
@@ -301,12 +455,43 @@ enum MarkdownBlockParser {
                 continue
             }
 
+            if MathFormatter.isStandaloneEquation(trimmed) {
+                flushParagraph()
+                var body: [Substring] = [line]
+                index += 1
+                while index < lines.count {
+                    let candidate = lines[index].trimmingCharacters(in: .whitespaces)
+                    guard !candidate.isEmpty else { break }
+                    guard MathFormatter.isStandaloneEquation(candidate) ||
+                        candidate.hasPrefix("\\left(") || candidate.hasPrefix("\\right)") ||
+                        candidate.hasPrefix("\\frac") || candidate.hasPrefix("=") ||
+                        candidate.hasPrefix("+") || candidate.hasPrefix("-")
+                    else { break }
+                    body.append(lines[index])
+                    index += 1
+                }
+                let rawCode = body.joined(separator: "\n")
+                emit(.math(equation: MathFormatter.formatEquation(rawCode), raw: rawCode, isClosed: true))
+                continue
+            }
+
             paragraph.append(String(line))
             index += 1
         }
 
         flushParagraph()
         return blocks
+    }
+
+    private static func extractEnvironmentName(_ line: String) -> String? {
+        guard let start = line.range(of: "\\begin{")?.upperBound else { return nil }
+        guard let end = line[start...].firstIndex(of: "}") else { return nil }
+        return String(line[start ..< end])
+    }
+
+    private static func isMathEnvironment(_ name: String) -> Bool {
+        let mathEnvs = ["equation", "equation*", "align", "align*", "aligned", "gather", "gather*", "multline", "multline*", "matrix", "pmatrix", "bmatrix", "vmatrix", "Vmatrix", "cases"]
+        return mathEnvs.contains(name)
     }
 
     private static func parseTableRow(_ line: Substring) -> [String] {
@@ -417,7 +602,7 @@ enum MarkdownInline {
     /// half-written emphasis run or a stray bracket from a partial stream renders
     /// as literal text rather than blanking the message.
     static func attributed(_ source: String, sources: [SearchResult]? = nil) -> AttributedString {
-        let preparedMath = prepareMath(source)
+        let preparedMath = MathFormatter.formatText(source)
         let prepared = prepareCitations(preparedMath, sources: sources)
         var options = AttributedString.MarkdownParsingOptions()
         options.interpretedSyntax = .inlineOnlyPreservingWhitespace
@@ -435,190 +620,12 @@ enum MarkdownInline {
         return attr
     }
 
-    /// Replaces common LaTeX math commands and inline/display math delimiters with
-    /// Unicode equivalents so math formulas render cleanly without full LaTeX rendering engines.
-    private static func prepareMath(_ text: String) -> String {
-        var result = text
-        if let displayRegex = try? NSRegularExpression(
-            pattern: #"\$\$(.+?)\$\$"#,
-            options: [.dotMatchesLineSeparators]
-        ) {
-            result = replaceMathMatches(in: result, regex: displayRegex)
-        }
-        if let bracketRegex = try? NSRegularExpression(
-            pattern: #"\\\[(.+?)\\\]"#,
-            options: [.dotMatchesLineSeparators]
-        ) {
-            result = replaceMathMatches(in: result, regex: bracketRegex)
-        }
-        if let parenRegex = try? NSRegularExpression(
-            pattern: #"\\\((.+?)\\\)"#,
-            options: [.dotMatchesLineSeparators]
-        ) {
-            result = replaceMathMatches(in: result, regex: parenRegex)
-        }
-        if let dollarRegex = try? NSRegularExpression(
-            pattern: #"(?<!\\|\$)\$(?!\s|\$)([^\$\n]+?)(?<!\s|\$)\$(?!\$)"#
-        ) {
-            result = replaceMathMatches(in: result, regex: dollarRegex)
-        }
-        result = replaceLaTeXCommands(in: result)
-        return result
+    /// Formats a standalone equation for rendering in a math block.
+    static func attributedMath(_ equation: String) -> AttributedString {
+        var attr = AttributedString(equation)
+        attr.font = .appSans(size: 17, weight: .regular)
+        return attr
     }
-
-    private static func replaceMathMatches(in text: String, regex: NSRegularExpression) -> String {
-        let range = NSRange(text.startIndex..., in: text)
-        let matches = regex.matches(in: text, range: range)
-        guard !matches.isEmpty else { return text }
-
-        var result = ""
-        var lastIndex = text.startIndex
-
-        for match in matches {
-            guard let fullRange = Range(match.range, in: text),
-                  let innerRange = Range(match.range(at: 1), in: text) else { continue }
-            let innerText = String(text[innerRange])
-            let replacedInner = replaceLaTeXCommands(in: innerText)
-            result += text[lastIndex ..< fullRange.lowerBound]
-            result += replacedInner
-            lastIndex = fullRange.upperBound
-        }
-        result += text[lastIndex...]
-        return result
-    }
-
-    private static func replaceLaTeXCommands(in text: String) -> String {
-        guard text.contains("\\") else { return text }
-        guard let regex = try? NSRegularExpression(pattern: #"\\[a-zA-Z]+"#) else { return text }
-        let range = NSRange(text.startIndex..., in: text)
-        let matches = regex.matches(in: text, range: range)
-        guard !matches.isEmpty else { return text }
-
-        var result = ""
-        var lastIndex = text.startIndex
-
-        for match in matches {
-            guard let matchRange = Range(match.range, in: text) else { continue }
-            let command = String(text[matchRange])
-            result += text[lastIndex ..< matchRange.lowerBound]
-            if let symbol = latexSymbols[command] {
-                result += symbol
-            } else {
-                result += command
-            }
-            lastIndex = matchRange.upperBound
-        }
-        result += text[lastIndex...]
-        return result
-    }
-
-    private static let latexSymbols: [String: String] = [
-        // Arrows
-        "\\rightarrow": "→",
-        "\\leftarrow": "←",
-        "\\leftrightarrow": "↔",
-        "\\Rightarrow": "⇒",
-        "\\Leftarrow": "⇐",
-        "\\Leftrightarrow": "⇔",
-        "\\mapsto": "↦",
-        "\\to": "→",
-        "\\gets": "←",
-
-        // Set / logic
-        "\\in": "∈",
-        "\\notin": "∉",
-        "\\subset": "⊂",
-        "\\supset": "⊃",
-        "\\subseteq": "⊆",
-        "\\supseteq": "⊇",
-        "\\forall": "∀",
-        "\\exists": "∃",
-        "\\nexists": "∄",
-        "\\emptyset": "∅",
-        "\\land": "∧",
-        "\\lor": "∨",
-        "\\neg": "¬",
-        "\\cap": "∩",
-        "\\cup": "∪",
-
-        // Relations
-        "\\leq": "≤",
-        "\\le": "≤",
-        "\\geq": "≥",
-        "\\ge": "≥",
-        "\\neq": "≠",
-        "\\ne": "≠",
-        "\\approx": "≈",
-        "\\equiv": "≡",
-        "\\sim": "∼",
-        "\\propto": "∝",
-
-        // Arithmetic
-        "\\pm": "±",
-        "\\mp": "∓",
-        "\\times": "×",
-        "\\div": "÷",
-        "\\cdot": "·",
-        "\\bullet": "•",
-        "\\circ": "∘",
-        "\\degree": "°",
-        "\\sqrt": "√",
-
-        // Calculus / symbols
-        "\\infty": "∞",
-        "\\partial": "∂",
-        "\\nabla": "∇",
-        "\\sum": "∑",
-        "\\prod": "∏",
-        "\\int": "∫",
-        "\\dots": "…",
-        "\\cdots": "…",
-        "\\ldots": "…",
-
-        // Greek lowercase
-        "\\alpha": "α",
-        "\\beta": "β",
-        "\\gamma": "γ",
-        "\\delta": "δ",
-        "\\epsilon": "ε",
-        "\\varepsilon": "ε",
-        "\\zeta": "ζ",
-        "\\eta": "η",
-        "\\theta": "θ",
-        "\\vartheta": "θ",
-        "\\iota": "ι",
-        "\\kappa": "κ",
-        "\\lambda": "λ",
-        "\\mu": "μ",
-        "\\nu": "ν",
-        "\\xi": "ξ",
-        "\\pi": "π",
-        "\\varpi": "π",
-        "\\rho": "ρ",
-        "\\varrho": "ρ",
-        "\\sigma": "σ",
-        "\\varsigma": "ς",
-        "\\tau": "τ",
-        "\\upsilon": "υ",
-        "\\phi": "φ",
-        "\\varphi": "φ",
-        "\\chi": "χ",
-        "\\psi": "ψ",
-        "\\omega": "ω",
-
-        // Greek uppercase
-        "\\Gamma": "Γ",
-        "\\Delta": "Δ",
-        "\\Theta": "Θ",
-        "\\Lambda": "Λ",
-        "\\Xi": "Ξ",
-        "\\Pi": "Π",
-        "\\Sigma": "Σ",
-        "\\Upsilon": "Υ",
-        "\\Phi": "Φ",
-        "\\Psi": "Ψ",
-        "\\Omega": "Ω",
-    ]
 
     /// Links `[n]` citation markers to their corresponding source URLs (R4.4).
     private static func prepareCitations(_ text: String, sources: [SearchResult]?) -> String {
@@ -775,6 +782,14 @@ struct MarkdownBlockView: View, Equatable {
                 headerAttributed: block.cachedTableHeaderAttributed,
                 rowsAttributed: block.cachedTableRowsAttributed,
                 sources: sources
+            )
+
+        case let .math(equation, raw, isClosed):
+            MathBlockView(
+                equation: equation,
+                raw: raw,
+                isClosed: isClosed,
+                cachedAttributed: block.cachedAttributed
             )
 
         case .rule:
