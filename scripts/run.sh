@@ -1,29 +1,53 @@
 #!/bin/bash
 # Builds, installs and launches Sate in the iOS Simulator with live mode (SATE_MOCK=0).
-#
-# Derived from scripts/e2e.sh: builds via build.sh (avoiding xcodebuild -destination
-# SDK skew issues), boots the target simulator if needed, installs the app,
-# and launches it connected to real Keychain credentials and live network.
+# Targets the iOS 26.5 simulator and shares Xcode's DerivedData build cache.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CONFIGURATION="${1:-Debug}"
 DEVICE="${SATE_DEVICE:-iPhone 17 Pro}"
+OS="${SATE_OS:-26.5}"
 BUNDLE_ID="com.dhison.sate"
 
-# Find booted device first, or fallback to matching device name
-UDID=$(xcrun simctl list devices | grep -F " (Booted)" | head -1 \
-    | grep -oE "[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}" || true)
+# Find target device UDID prioritizing iOS 26.5
+UDID=$(python3 -c '
+import json, subprocess, sys
+device_name = sys.argv[1]
+runtime_target = sys.argv[2]
+try:
+    data = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))
+    devices_by_runtime = data.get("devices", {})
+    target_key = next((k for k in devices_by_runtime if runtime_target in k), None)
 
-if [ -z "$UDID" ]; then
-    UDID=$(xcrun simctl list devices available | grep -F "$DEVICE (" | head -1 \
-        | grep -oE "[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}" || true)
-fi
+    if target_key:
+        for d in devices_by_runtime[target_key]:
+            if d["name"] == device_name and d["state"] == "Booted":
+                print(d["udid"])
+                sys.exit(0)
+        for d in devices_by_runtime[target_key]:
+            if d["name"] == device_name:
+                print(d["udid"])
+                sys.exit(0)
+
+    for rk, devs in devices_by_runtime.items():
+        for d in devs:
+            if d["name"] == device_name and d["state"] == "Booted":
+                print(d["udid"])
+                sys.exit(0)
+
+    for rk, devs in devices_by_runtime.items():
+        for d in devs:
+            if d["name"] == device_name:
+                print(d["udid"])
+                sys.exit(0)
+except Exception:
+    pass
+' "$DEVICE" "iOS-${OS//./-}")
 
 [ -n "$UDID" ] || { echo "No simulator available for '$DEVICE'"; exit 1; }
-echo "Target Simulator: $DEVICE ($UDID)"
+echo "Target Simulator: $DEVICE ($UDID) [iOS $OS]"
 
-./scripts/build.sh "$CONFIGURATION"
+SATE_DEVICE="$DEVICE" SATE_OS="$OS" ./scripts/build.sh "$CONFIGURATION"
 
 echo "Booting simulator if needed..."
 xcrun simctl bootstatus "$UDID" -b >/dev/null 2>&1 || xcrun simctl boot "$UDID" || true

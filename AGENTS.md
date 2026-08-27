@@ -24,9 +24,7 @@ Zero third-party packages. Swift Testing (`@Test`/`#expect`), not XCTest.
 ./scripts/capture-fixtures.sh <model> # operator-run; needs SATE_CF_ACCOUNT + SATE_CF_TOKEN
 ```
 
-`xcodebuild -destination` cannot resolve a simulator on this machine (SDK/runtime
-skew), so `build.sh` uses `-target Sate -sdk iphonesimulator`. Don't "fix" it
-back. `simctl` forwards env vars only with a `SIMCTL_CHILD_` prefix.
+`build.sh` builds the `Sate` scheme targeting the iOS 26.5 simulator (`-scheme Sate -destination ...`), sharing DerivedData with Xcode's Cmd+R so build artifacts are reused across CLI and Xcode. `simctl` forwards env vars only with a `SIMCTL_CHILD_` prefix.
 
 ## Architecture
 

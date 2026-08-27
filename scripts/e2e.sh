@@ -2,31 +2,57 @@
 # End-to-end verification in the simulator: build -> boot -> install -> launch ->
 # drive -> screenshot, driving everything through simctl.
 #
-# Two things worth knowing about this script:
-#
-# 1. It never uses `xcodebuild -destination`. On this machine Xcode 26.6 ships
-#    the iOS 26.5 SDK but only the 26.2 simulator runtime is installed, and
-#    xcodebuild's destination resolver then refuses to enumerate ANY simulator.
-#    scripts/build.sh sidesteps that with -target/-sdk.
-#
-# 2. It drives the app with SATE_DEMO rather than synthetic taps. Coordinate
-#    clicking against the Simulator window is brittle and silently wrong when the
-#    window is moved or rescaled; a launch-argument hook is deterministic.
-#    SATE_MOCK=1 replays a bundled SSE fixture through the REAL SSEParser and
-#    ChatCompletionsCodec, so no Cloudflare token and no network are needed.
+# It drives the app with SATE_DEMO rather than synthetic taps. Coordinate
+# clicking against the Simulator window is brittle and silently wrong when the
+# window is moved or rescaled; a launch-argument hook is deterministic.
+# SATE_MOCK=1 replays a bundled SSE fixture through the REAL SSEParser and
+# ChatCompletionsCodec, so no Cloudflare token and no network are needed.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 DEVICE="${SATE_DEVICE:-iPhone 17 Pro}"
+OS="${SATE_OS:-26.5}"
 BUNDLE_ID="com.dhison.sate"
 OUT="artifacts"
 mkdir -p "$OUT"
 
-UDID=$(xcrun simctl list devices available | grep -F "$DEVICE (" | head -1 \
-    | grep -oE "[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}")
-[ -n "$UDID" ] || { echo "No simulator named '$DEVICE'"; exit 1; }
-echo "Device: $DEVICE ($UDID)"
+UDID=$(python3 -c '
+import json, subprocess, sys
+device_name = sys.argv[1]
+runtime_target = sys.argv[2]
+try:
+    data = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))
+    devices_by_runtime = data.get("devices", {})
+    target_key = next((k for k in devices_by_runtime if runtime_target in k), None)
 
-./scripts/build.sh Debug
+    if target_key:
+        for d in devices_by_runtime[target_key]:
+            if d["name"] == device_name and d["state"] == "Booted":
+                print(d["udid"])
+                sys.exit(0)
+        for d in devices_by_runtime[target_key]:
+            if d["name"] == device_name:
+                print(d["udid"])
+                sys.exit(0)
+
+    for rk, devs in devices_by_runtime.items():
+        for d in devs:
+            if d["name"] == device_name and d["state"] == "Booted":
+                print(d["udid"])
+                sys.exit(0)
+
+    for rk, devs in devices_by_runtime.items():
+        for d in devs:
+            if d["name"] == device_name:
+                print(d["udid"])
+                sys.exit(0)
+except Exception:
+    pass
+' "$DEVICE" "iOS-${OS//./-}")
+
+[ -n "$UDID" ] || { echo "No simulator named '$DEVICE'"; exit 1; }
+echo "Device: $DEVICE ($UDID) [iOS $OS]"
+
+SATE_DEVICE="$DEVICE" SATE_OS="$OS" ./scripts/build.sh Debug
 
 xcrun simctl bootstatus "$UDID" -b >/dev/null 2>&1 || xcrun simctl boot "$UDID" || true
 xcrun simctl bootstatus "$UDID" -b >/dev/null 2>&1 || true

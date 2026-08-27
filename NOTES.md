@@ -200,18 +200,9 @@ What it does instead:
 If you want genuinely live answers, that needs a retrieval step — see *Pending*,
 item 7. Editable in Settings, with a **Restore Default Prompt** action.
 
-## Environment blocker (worked around, not fixed)
+## Environment: iOS 26.5 & Shared DerivedData
 
-`xcodebuild` refuses to enumerate **any** simulator destination on this machine:
-Xcode 26.6 ships the iOS 26.5 SDK but only the iOS 26.2 runtime is installed, so
-`-destination 'platform=iOS Simulator,…'` fails with "Unable to find a
-destination matching the provided destination specifier".
-
-Workaround, in `scripts/build.sh`: build with `-target … -sdk iphonesimulator`,
-which bypasses the destination resolver, then drive the simulator with `simctl`.
-This works completely — build, install, launch, screenshot. Installing the iOS
-26.5 simulator runtime (Xcode ▸ Settings ▸ Components) would restore the normal
-`-destination` flow and let an XCUITest target run.
+`xcodebuild` targets the iOS 26.5 simulator runtime using the `Sate` scheme (`-scheme Sate -destination ...`). Scripts share standard DerivedData with Xcode's Cmd+R (`~/Library/Developer/Xcode/DerivedData/Sate-...`), allowing instantaneous incremental builds across the CLI and Xcode without duplicate compilation. `build/` contains a symlink to DerivedData for backwards compatibility.
 
 ## Verifying it yourself
 

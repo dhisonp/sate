@@ -1,16 +1,23 @@
 #!/bin/bash
-# Builds the iOS app for the simulator.
-#
-# NOTE: we use `-target` + `-sdk iphonesimulator` rather than `-scheme` +
-# `-destination`. On this machine Xcode 26.6 ships the iOS 26.5 SDK but only the
-# iOS 26.2 simulator runtime is installed, and xcodebuild's scheme destination
-# resolver refuses to enumerate ANY simulator as a result. The target-based
-# invocation bypasses that resolver and builds correctly.
+# Builds the iOS app for the iOS Simulator using the Sate scheme.
+# Matches Xcode's Cmd+R by sharing the standard DerivedData build cache.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
 CONFIG="${1:-Debug}"
-xcodebuild -project Sate.xcodeproj -target Sate -configuration "$CONFIG" \
-    -sdk iphonesimulator build "${@:2}" | \
+DEVICE="${SATE_DEVICE:-iPhone 17 Pro}"
+OS="${SATE_OS:-26.5}"
+DESTINATION="${SATE_DESTINATION:-platform=iOS Simulator,name=${DEVICE},OS=${OS}}"
+
+xcodebuild -project Sate.xcodeproj -scheme Sate -configuration "$CONFIG" \
+    -destination "$DESTINATION" build "${@:2}" | \
     grep -E "error:|warning:|BUILD (SUCCEEDED|FAILED)" || true
-test -d "build/${CONFIG}-iphonesimulator/Sate.app"
-echo "App: build/${CONFIG}-iphonesimulator/Sate.app"
+
+TARGET_BUILD_DIR=$(xcodebuild -project Sate.xcodeproj -scheme Sate -configuration "$CONFIG" \
+    -destination "$DESTINATION" -showBuildSettings | awk -F ' = ' '/^ *TARGET_BUILD_DIR =/ {print $2}')
+APP_PATH="${TARGET_BUILD_DIR}/Sate.app"
+
+test -d "$APP_PATH"
+mkdir -p build
+ln -sfn "$TARGET_BUILD_DIR" "build/${CONFIG}-iphonesimulator"
+echo "App: $APP_PATH"
