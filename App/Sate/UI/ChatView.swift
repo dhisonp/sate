@@ -293,6 +293,7 @@ struct ChatView: View {
         HStack(spacing: 12) {
             Text(title)
                 .font(.appSans(.footnote))
+                .appLineSpacing(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
@@ -446,6 +447,7 @@ private struct ErrorBanner: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(error.userMessage)
                     .font(.appSans(.footnote))
+                    .appLineSpacing(.footnote)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Button("Retry", action: onRetry)
@@ -478,6 +480,7 @@ private struct EditMessageSheet: View {
             GlassEffectContainer {
                 TextEditor(text: $text)
                     .font(.appSans(.body))
+                    .appLineSpacing(.body)
                     .scrollContentBackground(.hidden)
                     .padding(12)
                     .glassEffect(.regular, in: .rect(cornerRadius: 18))

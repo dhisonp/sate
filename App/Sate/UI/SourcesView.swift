@@ -100,6 +100,7 @@ struct SourcesView: View {
 
                             Text(source.title)
                                 .font(.appSans(.footnote, weight: .semibold))
+                                .appLineSpacing(.footnote)
                                 .foregroundStyle(.primary)
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
@@ -107,6 +108,7 @@ struct SourcesView: View {
                             if !source.snippet.isEmpty {
                                 Text(source.snippet)
                                     .font(.appSans(.caption))
+                                    .appLineSpacing(.caption)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(3)
                                     .multilineTextAlignment(.leading)

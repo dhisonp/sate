@@ -712,12 +712,14 @@ struct MarkdownBlockView: View, Equatable {
         case let .paragraph(text):
             Text(block.cachedAttributed ?? MarkdownInline.attributed(text, sources: sources))
                 .font(.appSans(.body))
+                .appLineSpacing(.body)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
         case let .heading(level, text):
             Text(block.cachedAttributed ?? MarkdownInline.attributed(text, sources: sources))
                 .font(headingFont(level))
+                .appLineSpacing(headingTextStyle(level))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, level == 1 ? 6 : 2)
@@ -733,6 +735,7 @@ struct MarkdownBlockView: View, Equatable {
                     .frame(width: 3)
                 Text(block.cachedAttributed ?? MarkdownInline.attributed(text))
                     .font(.appSans(.body))
+                    .appLineSpacing(.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -754,6 +757,7 @@ struct MarkdownBlockView: View, Equatable {
                             .foregroundStyle(.secondary)
                         Text(attributedItem)
                             .font(.appSans(.body))
+                            .appLineSpacing(.body)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -780,6 +784,14 @@ struct MarkdownBlockView: View, Equatable {
         case 1: return .appSans(.title2, weight: .bold)
         case 2: return .appSans(.title3, weight: .semibold)
         default: return .appSans(.headline, weight: .semibold)
+        }
+    }
+
+    private func headingTextStyle(_ level: Int) -> Font.TextStyle {
+        switch level {
+        case 1: return .title2
+        case 2: return .title3
+        default: return .headline
         }
     }
 }
@@ -846,6 +858,7 @@ private struct CodeBlockView: View {
             ScrollView(.horizontal) {
                 Text(code.isEmpty ? " " : code)
                     .font(.appMono(.footnote))
+                    .lineSpacing(2.5)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
             }
@@ -886,6 +899,7 @@ private struct TableView: View {
                                 ?? MarkdownInline.attributed(title, sources: sources)
                             Text(text.characters.isEmpty ? AttributedString(" ") : text)
                                 .font(.appSans(.body, weight: .bold))
+                                .appLineSpacing(.body)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
@@ -902,6 +916,7 @@ private struct TableView: View {
                             } ?? MarkdownInline.attributed(cell, sources: sources)
                             Text(text.characters.isEmpty ? AttributedString(" ") : text)
                                 .font(.appSans(.body))
+                                .appLineSpacing(.body)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }

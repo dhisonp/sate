@@ -25,6 +25,7 @@ struct InputBar: View {
         VStack(alignment: .leading, spacing: 8) {
             TextField("Message", text: $vm.input, axis: .vertical)
                 .font(.appSans(.body))
+                .appLineSpacing(.body)
                 .lineLimit(1 ... 8)
                 .textFieldStyle(.plain)
                 .focused($isFocused)

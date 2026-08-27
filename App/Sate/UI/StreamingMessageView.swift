@@ -38,6 +38,7 @@ struct StreamingMessageView: View {
                 }
             }
             .font(.appSans(.body))
+            .appLineSpacing(.body)
             // Selection resets and flickers while the text mutates; committed
             // messages enable it instead.
             .textSelection(.disabled)
@@ -71,6 +72,7 @@ private struct StreamingReasoningView: View, Equatable {
                     .foregroundStyle(.secondary)
                 Text(reasoning)
                     .font(.appSans(.callout))
+                    .appLineSpacing(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

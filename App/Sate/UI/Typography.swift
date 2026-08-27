@@ -42,6 +42,28 @@ extension Font.TextStyle {
         @unknown default: 17
         }
     }
+
+    /// Line spacing in points following accessible typography standards tuned
+    /// for Atkinson Hyperlegible's metrics on the tighter side (~1.30–1.36x ratio).
+    var accessibleLineSpacing: CGFloat {
+        switch self {
+        case .largeTitle, .title: 3.0
+        case .title2, .title3, .headline: 2.5
+        case .body: 3.5
+        case .callout: 3.0
+        case .subheadline: 2.5
+        case .footnote: 2.0
+        case .caption, .caption2: 1.5
+        @unknown default: 3.0
+        }
+    }
+}
+
+extension View {
+    /// Applies accessible line spacing for the specified text style.
+    func appLineSpacing(_ textStyle: Font.TextStyle = .body) -> some View {
+        lineSpacing(textStyle.accessibleLineSpacing)
+    }
 }
 
 extension Font {

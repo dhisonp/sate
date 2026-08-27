@@ -36,6 +36,7 @@ struct MessageBubble: View, Equatable {
         case .user:
             Text(message.text)
                 .font(.appSans(.body))
+                .appLineSpacing(.body)
                 .fixedSize(horizontal: false, vertical: true)
                 .multilineTextAlignment(.leading)
                 .padding(.horizontal, 14)
@@ -81,6 +82,7 @@ struct MessageBubble: View, Equatable {
         case .system, .tool:
             Text(message.text)
                 .font(.appSans(.footnote))
+                .appLineSpacing(.footnote)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -244,6 +246,7 @@ private struct ReasoningDisclosure: View {
             if isExpanded {
                 Text(text)
                     .font(.appSans(.callout))
+                    .appLineSpacing(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
