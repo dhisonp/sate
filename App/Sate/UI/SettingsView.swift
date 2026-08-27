@@ -35,8 +35,10 @@ struct SettingsView: View {
                 }
             } header: {
                 Text("Cloudflare")
+                    .settingsSectionHeader()
             } footer: {
                 Text("Both appear on the AI Gateway page of the Cloudflare dashboard.")
+                    .settingsSectionFooter()
             }
 
             Section {
@@ -60,6 +62,7 @@ struct SettingsView: View {
                 if let tokenError {
                     Text(tokenError)
                         .font(.appSans(.caption))
+                        .appLineSpacing(.caption)
                         .foregroundStyle(.red)
                 }
 
@@ -99,6 +102,7 @@ struct SettingsView: View {
                 }
             } header: {
                 Text("API Token")
+                    .settingsSectionHeader()
             } footer: {
                 Text("""
                 The token needs BOTH permissions: Account › Workers AI › Read \
@@ -109,6 +113,7 @@ struct SettingsView: View {
                 never written to logs or the debug panel. Restoring to a new device \
                 requires entering it again.
                 """)
+                .settingsSectionFooter()
             }
 
             Section {
@@ -138,6 +143,7 @@ struct SettingsView: View {
                 if let searchTokenError {
                     Text(searchTokenError)
                         .font(.appSans(.caption))
+                        .appLineSpacing(.caption)
                         .foregroundStyle(.red)
                 }
 
@@ -184,11 +190,13 @@ struct SettingsView: View {
                 Stepper("Results per query: \(env.settings.searchResultsPerQuery)", value: $env.settings.searchResultsPerQuery, in: 1 ... 8)
             } header: {
                 Text("Web Search")
+                    .settingsSectionHeader()
             } footer: {
                 Text("""
                 Uses Tavily Search directly from device. The key is stored securely in the Keychain. \
                 A search failure will never block chat.
                 """)
+                .settingsSectionFooter()
             }
 
             Section {
@@ -196,6 +204,7 @@ struct SettingsView: View {
                 ModelField(title: "Title model", model: $env.settings.titleModel)
             } header: {
                 Text("Models")
+                    .settingsSectionHeader()
             } footer: {
                 Text("""
                 The list is Cloudflare's own @cf models: they run on Workers AI, \
@@ -203,6 +212,7 @@ struct SettingsView: View {
                 string the gateway resolves. The title model is used only for auto-naming \
                 conversations.
                 """)
+                .settingsSectionFooter()
             }
 
             Section {
@@ -211,6 +221,8 @@ struct SettingsView: View {
                     text: $env.settings.systemPrompt,
                     axis: .vertical
                 )
+                .font(.appSans(.body))
+                .appLineSpacing(.body)
                 .lineLimit(3 ... 12)
 
                 if env.settings.systemPrompt != SystemPrompt.generalAssistant {
@@ -220,12 +232,14 @@ struct SettingsView: View {
                 }
             } header: {
                 Text("System Prompt")
+                    .settingsSectionHeader()
             } footer: {
                 Text("""
                 \(SystemPrompt.currentDateToken) is replaced with today's date on every send. \
                 The default prompt instructs the model to provide direct, concise answers \
                 and state what it last knew when relevant.
                 """)
+                .settingsSectionFooter()
             }
 
             Section {
@@ -252,6 +266,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading) {
                         Text(String(format: "Temperature %.2f", temperature.wrappedValue))
                             .font(.appSans(.footnote))
+                            .appLineSpacing(.footnote)
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                         Slider(value: temperature, in: 0 ... 2, step: 0.05)
@@ -260,6 +275,7 @@ struct SettingsView: View {
                 }
             } header: {
                 Text("Generation")
+                    .settingsSectionHeader()
             } footer: {
                 Text("""
                 Max tokens is always sent — several providers default to a small or \
@@ -269,6 +285,7 @@ struct SettingsView: View {
                 are displayed in the chat transcript. Leaving temperature unset omits \
                 the field so the provider default applies, which is not the same as sending 0.
                 """)
+                .settingsSectionFooter()
             }
 
             Section {
@@ -278,6 +295,7 @@ struct SettingsView: View {
                 Toggle("Show debug panel", isOn: $env.settings.showDebugPanel)
             } header: {
                 Text("Diagnostics")
+                    .settingsSectionHeader()
             } footer: {
                 Text("""
                 Usage reporting requests stream_options.include_usage — without it \
@@ -285,6 +303,7 @@ struct SettingsView: View {
                 Turning off payload logging keeps prompts and responses out of the \
                 Cloudflare log viewer.
                 """)
+                .settingsSectionFooter()
             }
         }
         .navigationTitle("Settings")
@@ -340,6 +359,7 @@ private struct ModelField: View {
                 Text("\(option.contextTokens.formatted()) token context\(option.reasons ? " · reasoning" : "")")
             }
             .font(.appSans(.caption))
+            .appLineSpacing(.caption)
             .foregroundStyle(.secondary)
         }
     }

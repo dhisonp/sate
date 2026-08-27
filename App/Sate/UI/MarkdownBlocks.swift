@@ -613,7 +613,7 @@ enum MarkdownInline {
             if var intent = run.inlinePresentationIntent, intent.contains(.code) {
                 intent.remove(.code)
                 attr[run.range].inlinePresentationIntent = intent.isEmpty ? nil : intent
-                attr[run.range].font = .appMono(size: 16, relativeTo: .body)
+                attr[run.range].font = .appMono(size: 15, relativeTo: .body)
                 attr[run.range].backgroundColor = Color.secondary.opacity(0.12)
             }
         }
@@ -732,7 +732,8 @@ struct MarkdownBlockView: View, Equatable {
                 .appLineSpacing(headingTextStyle(level))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, level == 1 ? 6 : 2)
+                .padding(.top, headingTopPadding(level, isFirst: block.id == 0))
+                .padding(.bottom, headingBottomPadding(level))
                 .accessibilityAddTraits(.isHeader)
 
         case let .code(language, code, isClosed):
@@ -752,7 +753,7 @@ struct MarkdownBlockView: View, Equatable {
             .frame(maxWidth: .infinity, alignment: .leading)
 
         case let .list(ordered, start, items):
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 7) {
                 ForEach(Array(items.enumerated()), id: \.offset) { offset, item in
                     let attributedItem = {
                         if let list = block.cachedListAttributed, offset < list.count {
@@ -801,7 +802,8 @@ struct MarkdownBlockView: View, Equatable {
         switch level {
         case 1: return .appSans(.title2, weight: .bold)
         case 2: return .appSans(.title3, weight: .semibold)
-        default: return .appSans(.headline, weight: .semibold)
+        case 3: return .appSans(.headline, weight: .semibold)
+        default: return .appSans(.subheadline, weight: .semibold)
         }
     }
 
@@ -809,7 +811,26 @@ struct MarkdownBlockView: View, Equatable {
         switch level {
         case 1: return .title2
         case 2: return .title3
-        default: return .headline
+        case 3: return .headline
+        default: return .subheadline
+        }
+    }
+
+    private func headingTopPadding(_ level: Int, isFirst: Bool) -> CGFloat {
+        guard !isFirst else { return 0 }
+        switch level {
+        case 1: return 16
+        case 2: return 12
+        case 3: return 8
+        default: return 6
+        }
+    }
+
+    private func headingBottomPadding(_ level: Int) -> CGFloat {
+        switch level {
+        case 1: return 2
+        case 2: return 1
+        default: return 0
         }
     }
 }
@@ -820,7 +841,7 @@ struct MarkdownBlocksView: View, Equatable {
     var sources: [SearchResult]?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             ForEach(MarkdownCache.blocks(for: source, sources: sources)) { block in
                 MarkdownBlockView(block: block, sources: sources)
                     .equatable()
@@ -876,7 +897,7 @@ private struct CodeBlockView: View {
             ScrollView(.horizontal) {
                 Text(code.isEmpty ? " " : code)
                     .font(.appMono(.footnote))
-                    .lineSpacing(2.5)
+                    .lineSpacing(3.5)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
             }

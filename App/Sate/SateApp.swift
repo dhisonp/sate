@@ -19,7 +19,6 @@ struct SateApp: App {
         WindowGroup {
             RootView()
                 .environment(environment)
-                .font(.appSans(.body))
         }
     }
 }

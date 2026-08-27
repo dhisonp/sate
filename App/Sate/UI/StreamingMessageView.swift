@@ -21,7 +21,7 @@ struct StreamingMessageView: View {
         if !draft.isActive && blocks.isEmpty && (!showThinking || draft.reasoning.isEmpty) {
             EmptyView()
         } else {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 if showThinking {
                     StreamingReasoningView(draft: draft)
                         .equatable()

@@ -26,22 +26,21 @@ enum AppFont {
 }
 
 extension Font.TextStyle {
-    /// Point sizes for sans-serif (Atkinson Hyperlegible Next), slightly bumped
-    /// for enhanced legibility and generous character distinction.
+    /// Point sizes for sans-serif (Atkinson Hyperlegible Next), adhering to standard HIG metrics.
     var sansPointSize: CGFloat {
         switch self {
-        case .largeTitle: 36
-        case .title: 30
-        case .title2: 24
-        case .title3: 21
-        case .headline: 18
-        case .body: 18
-        case .callout: 17
-        case .subheadline: 16
-        case .footnote: 14
-        case .caption: 13
-        case .caption2: 12
-        @unknown default: 18
+        case .largeTitle: 34
+        case .title: 28
+        case .title2: 22
+        case .title3: 20
+        case .headline: 17
+        case .body: 17
+        case .callout: 16
+        case .subheadline: 15
+        case .footnote: 13
+        case .caption: 12
+        case .caption2: 11
+        @unknown default: 17
         }
     }
 
@@ -67,18 +66,21 @@ extension Font.TextStyle {
         sansPointSize
     }
 
-    /// Line spacing in points following accessible typography standards tuned
-    /// for Atkinson Hyperlegible's metrics on the tighter side (~1.30–1.36x ratio).
+    /// Line spacing in points following accessible typography standards (~1.45–1.50x line-height ratio).
     var accessibleLineSpacing: CGFloat {
         switch self {
-        case .largeTitle, .title: 3.0
-        case .title2, .title3, .headline: 2.5
-        case .body: 3.5
-        case .callout: 3.0
-        case .subheadline: 2.5
-        case .footnote: 2.0
-        case .caption, .caption2: 1.5
-        @unknown default: 3.0
+        case .largeTitle: 6.0
+        case .title: 5.0
+        case .title2: 4.5
+        case .title3: 4.0
+        case .headline: 4.0
+        case .body: 5.5
+        case .callout: 4.5
+        case .subheadline: 4.0
+        case .footnote: 3.0
+        case .caption: 2.5
+        case .caption2: 2.0
+        @unknown default: 4.0
         }
     }
 }
@@ -87,6 +89,19 @@ extension View {
     /// Applies accessible line spacing for the specified text style.
     func appLineSpacing(_ textStyle: Font.TextStyle = .body) -> some View {
         lineSpacing(textStyle.accessibleLineSpacing)
+    }
+
+    /// Applies accessible styling for Form section footers.
+    func settingsSectionFooter() -> some View {
+        font(.appSans(.footnote))
+            .appLineSpacing(.footnote)
+            .foregroundStyle(.secondary)
+    }
+
+    /// Applies accessible styling for Form section headers.
+    func settingsSectionHeader() -> some View {
+        font(.appSans(.footnote, weight: .semibold))
+            .foregroundStyle(.secondary)
     }
 }
 

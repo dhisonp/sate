@@ -252,6 +252,8 @@ struct ConversationListView: View {
                 Label("No Conversations", systemImage: "bubble.left.and.bubble.right")
             } description: {
                 Text("Start one with the compose button.")
+                    .font(.appSans(.subheadline))
+                    .appLineSpacing(.subheadline)
             } actions: {
                 Button("New Conversation") { createConversation() }
                     .buttonStyle(.borderedProminent)
@@ -267,6 +269,8 @@ struct ConversationListView: View {
 
                 The token needs both Account › Workers AI › Read and AI Gateway › Run.
                 """)
+                .font(.appSans(.subheadline))
+                .appLineSpacing(.subheadline)
             } actions: {
                 Button("Open Settings") { path.append(.settings) }
                     .buttonStyle(.borderedProminent)

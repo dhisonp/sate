@@ -521,8 +521,10 @@ private struct ModelSheet: View {
                         .autocorrectionDisabled()
                 } header: {
                     Text("Model for this conversation")
+                        .settingsSectionHeader()
                 } footer: {
                     Text("Free-form. The gateway resolves it, including dynamic routes.")
+                        .settingsSectionFooter()
                 }
 
                 if !env.settings.defaultModel.isEmpty, env.settings.defaultModel != vm.model {
@@ -541,8 +543,10 @@ private struct ModelSheet: View {
                     }
                 } header: {
                     Text("Reasoning")
+                        .settingsSectionHeader()
                 } footer: {
                     Text("Thinking level controls reasoning effort before answering.")
+                        .settingsSectionFooter()
                 }
             }
             .navigationTitle("Model")
