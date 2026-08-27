@@ -59,7 +59,7 @@ struct SettingsView: View {
 
                 if let tokenError {
                     Text(tokenError)
-                        .font(.caption)
+                        .font(.appSans(.caption))
                         .foregroundStyle(.red)
                 }
 
@@ -137,7 +137,7 @@ struct SettingsView: View {
 
                 if let searchTokenError {
                     Text(searchTokenError)
-                        .font(.caption)
+                        .font(.appSans(.caption))
                         .foregroundStyle(.red)
                 }
 
@@ -241,6 +241,8 @@ struct SettingsView: View {
                     }
                 }
 
+                Toggle("Show reasoning", isOn: $env.settings.showThinking)
+
                 Toggle("Set temperature", isOn: $isTemperatureEnabled)
                 if isTemperatureEnabled {
                     let temperature = Binding<Double>(
@@ -249,7 +251,7 @@ struct SettingsView: View {
                     )
                     VStack(alignment: .leading) {
                         Text(String(format: "Temperature %.2f", temperature.wrappedValue))
-                            .font(.footnote)
+                            .font(.appSans(.footnote))
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                         Slider(value: temperature, in: 0 ... 2, step: 0.05)
@@ -263,8 +265,9 @@ struct SettingsView: View {
                 Max tokens is always sent — several providers default to a small or \
                 unbounded value. Thinking level controls reasoning effort before \
                 answering; higher levels spend more tokens and time, while Off \
-                omits the parameter. Leaving temperature unset omits the field so the \
-                provider default applies, which is not the same as sending 0.
+                omits the parameter. Show reasoning controls whether thought steps \
+                are displayed in the chat transcript. Leaving temperature unset omits \
+                the field so the provider default applies, which is not the same as sending 0.
                 """)
             }
 
@@ -330,13 +333,13 @@ private struct ModelField: View {
             TextField("provider/model", text: $model)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .font(.system(.body, design: .monospaced))
+                .font(.appMono(.body))
         } else if let option = ModelCatalog.option(id: model) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(option.summary)
                 Text("\(option.contextTokens.formatted()) token context\(option.reasons ? " · reasoning" : "")")
             }
-            .font(.caption)
+            .font(.appSans(.caption))
             .foregroundStyle(.secondary)
         }
     }

@@ -21,6 +21,8 @@ public struct SateSettings: Codable, Sendable, Hashable {
     public var temperature: Double?
     /// User-controlled reasoning effort sent with completion requests. Default is `.off`.
     public var thinkingLevel: ThinkingLevel
+    /// Controls whether reasoning thought process is displayed in chat. Default is true.
+    public var showThinking: Bool
     /// Always sent: several providers default to a small or unbounded value, and
     /// the reserve in `ContextWindow` is only meaningful if the cap is explicit.
     public var maxTokens: Int
@@ -49,6 +51,7 @@ public struct SateSettings: Codable, Sendable, Hashable {
         systemPromptWithSearch = SystemPrompt.generalAssistantWithSearch
         temperature = nil
         thinkingLevel = .off
+        showThinking = true
         maxTokens = 16384
         includeUsage = true
         collectLogPayload = true
@@ -83,7 +86,7 @@ public struct SateSettings: Codable, Sendable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case accountID, gatewayID, defaultModel, titleModel, systemPrompt, systemPromptWithSearch
-        case temperature, thinkingLevel, maxTokens, includeUsage, collectLogPayload
+        case temperature, thinkingLevel, showThinking, maxTokens, includeUsage, collectLogPayload
         case contextWindows, showDebugPanel
         case searchEnabledByDefault, searchProvider, maxSearchRounds, searchResultsPerQuery, alwaysSearchFirstTurn
     }
@@ -101,6 +104,8 @@ public struct SateSettings: Codable, Sendable, Hashable {
         temperature = try container.decodeIfPresent(Double.self, forKey: .temperature)
         thinkingLevel = try container.decodeIfPresent(ThinkingLevel.self, forKey: .thinkingLevel)
             ?? defaults.thinkingLevel
+        showThinking = try container.decodeIfPresent(Bool.self, forKey: .showThinking)
+            ?? defaults.showThinking
         maxTokens = try container.decodeIfPresent(Int.self, forKey: .maxTokens) ?? defaults.maxTokens
         includeUsage = try container.decodeIfPresent(Bool.self, forKey: .includeUsage) ?? defaults.includeUsage
         collectLogPayload = try container.decodeIfPresent(Bool.self, forKey: .collectLogPayload)

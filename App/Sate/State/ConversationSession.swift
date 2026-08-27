@@ -230,6 +230,8 @@ actor ConversationSession {
             var lastCheckpoint = Date()
             var toolCallFragments: [Int: (id: String?, name: String?, arguments: String)] = [:]
 
+            var tagParser = ReasoningTagParser()
+
             let ticker = Task.detached(priority: .utility) {
                 while !Task.isCancelled {
                     do {
@@ -249,8 +251,10 @@ actor ConversationSession {
                         responseModel = model
                         await MainActor.run { events.started(responseID, model) }
                     case let .textDelta(delta):
-                        text += delta
-                        if buffer.append(text: delta) {
+                        let (parsedText, parsedReasoning) = tagParser.process(text: delta)
+                        text += parsedText
+                        reasoning += parsedReasoning
+                        if buffer.append(text: parsedText, reasoning: parsedReasoning) {
                             await MainActor.run { events.flushed(buffer) }
                         }
                     case let .reasoningDelta(delta):
@@ -323,6 +327,13 @@ actor ConversationSession {
                 Log.network.info(
                     "Stream task cancelled at end of stream loop for \(conversationID, privacy: .public)"
                 )
+            }
+
+            let (trailingText, trailingReasoning) = tagParser.finish()
+            if !trailingText.isEmpty || !trailingReasoning.isEmpty {
+                text += trailingText
+                reasoning += trailingReasoning
+                _ = buffer.append(text: trailingText, reasoning: trailingReasoning)
             }
 
             ticker.cancel()

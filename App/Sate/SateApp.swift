@@ -11,10 +11,15 @@ enum SateRoute: Hashable {
 struct SateApp: App {
     @State private var environment = AppEnvironment.live()
 
+    init() {
+        AppFont.registerFonts()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(environment)
+                .font(.appSans(.body))
         }
     }
 }

@@ -94,6 +94,8 @@ actor MockGatewayClient: LLMStreaming {
                 && request.extra["thinking"] != .object(["type": .string("disabled")])
                 && request.extra["thinking"] != .object(["enabled": .bool(false)]))
             || (request.extra["reasoning_effort"] != nil)
+            || (request.extra["thinking_config"] != nil
+                && request.extra["thinking_config"] != .object(["thinking_budget": .number(0)]))
 
         let script: String
         if isAnsweringTool {

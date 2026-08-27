@@ -25,6 +25,7 @@ money, or correctness. *Minor*: misleading but bounded.
 | [10](#10) | Minor | Codec | `extra["max_tokens"] = null` unbounded the bill |
 | [11](#11) | Minor | Docs | `SessionEntry.unknown` promised what it did not do |
 | [12](#12) | Major | Secrets | Keychain write failure was swallowed and cached unconditionally |
+| [13](#13) | Major | Streaming/UI | In-band `<think>` reasoning tags bypassed toggle and selector, polluting text and context |
 
 ---
 
@@ -287,6 +288,21 @@ skipped on load and left untouched on disk.
 **Fix.** Made `setToken` and `setSearchToken` throwing, update cache only after successful write, surfaced errors in `SettingsView`, hardened `KeychainSecretStore.set` to delete-then-add, eliminated double Keychain reads in `init`, and replaced per-process randomized `hashValue` in configuration signature with a deterministic token fingerprint.
 
 **Test** `SecretStoreTests.swift` — token lifecycle, search token lifecycle, and error propagation under failing store.
+
+---
+
+<a id="13"></a>
+## 13. In-band `<think>` reasoning tags bypassed toggle and selector, polluting text and context
+
+**Severity** Major · **Where** `Sources/SateCore/Streaming/ReasoningTagParser.swift`, `App/Sate/State/ConversationSession.swift:250`, `Sources/SateCore/Context/ContextBuilder.swift:188`
+
+Open-weights models (DeepSeek-R1, Qwen 3.8, Gemma 4) emit their reasoning inside `<think>...</think>` or `<thought>...</thought>` blocks within the text stream. Sate lacked in-band reasoning tag parsing.
+
+**Failure scenario.** When the user turned off reasoning via the toggle (`showThinking = false`) or selector (`thinkingLevel = .off`), reasoning models still emitted `<think>` tags in their text deltas. Because Sate did not parse these tags, the entire verbose reasoning trace was dumped as raw text directly into the message body, completely ignoring the toggle. Furthermore, `ContextBuilder` included the previous turns' raw `<think>` blocks in history context, causing models to keep emitting verbose reasoning in subsequent turns.
+
+**Fix.** Implemented `ReasoningTagParser` in SateCore to incrementally extract in-band `<think>` and `<thought>` tags across arbitrary chunk boundaries, routing thought traces to `reasoning` and the clean answer to `text`. Added `.google` family to `ThinkingPolicy`, sanitized context history to strip residual think tags, and set `ReasoningDisclosure` to collapsed by default (`isExpanded = false`).
+
+**Tests** `ReasoningTagParserTests.swift` (single string, chunk boundaries, interrupted streams, false-positive prefixes, stripping), `ThinkingPolicyTests.swift` (`.google` family).
 
 ---
 

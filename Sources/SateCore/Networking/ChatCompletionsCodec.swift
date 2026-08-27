@@ -316,11 +316,22 @@ public struct ChatCompletionsCodec: Sendable {
         let choice = Self.fields(Self.list(root["choices"])?.first)
         let message = Self.fields(choice?["message"])
 
-        if let reasoning = message.flatMap(Self.reasoning), !reasoning.isEmpty {
+        var explicitReasoning = message.flatMap(Self.reasoning)
+        var rawText = message.flatMap { Self.text(fromContent: $0["content"]) } ?? ""
+
+        if explicitReasoning == nil || explicitReasoning?.isEmpty == true, !rawText.isEmpty {
+            let extracted = ReasoningTagParser.extract(from: rawText)
+            rawText = extracted.text
+            if let inBandReasoning = extracted.reasoning {
+                explicitReasoning = inBandReasoning
+            }
+        }
+
+        if let reasoning = explicitReasoning, !reasoning.isEmpty {
             events.append(.reasoningDelta(reasoning))
         }
-        if let text = message.flatMap({ Self.text(fromContent: $0["content"]) }), !text.isEmpty {
-            events.append(.textDelta(text))
+        if !rawText.isEmpty {
+            events.append(.textDelta(rawText))
         }
         for call in Self.toolCallEvents(message?["tool_calls"]) {
             events.append(call)

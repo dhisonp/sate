@@ -207,6 +207,20 @@ final class AppEnvironment {
         await delete([id])
     }
 
+    func rename(_ id: UUID, to title: String) async {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            try await store.update(title: trimmed, model: nil, for: id)
+        } catch {
+            Log.persist.error("Failed to rename conversation \(id, privacy: .public): \(error, privacy: .public)")
+        }
+        if let existing = viewModels[id] {
+            existing.title = trimmed
+        }
+        await refresh()
+    }
+
     func deleteAll() async {
         let allIDs = Set(conversations.map(\.id)).union(sessions.keys).union(viewModels.keys)
         await delete(allIDs)

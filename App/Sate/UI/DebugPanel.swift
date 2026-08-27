@@ -30,7 +30,7 @@ struct DebugPanel: View {
                         .foregroundStyle(status < 400 ? .secondary : Color.red)
                 }
             }
-            .font(.caption.weight(.medium))
+            .font(.appSans(.caption, weight: .medium))
             .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 14)
@@ -90,6 +90,6 @@ private struct DebugRow: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .font(.system(.caption2, design: .monospaced))
+        .font(.appMono(.caption2))
     }
 }

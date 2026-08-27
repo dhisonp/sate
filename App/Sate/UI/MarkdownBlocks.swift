@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Block model
 
@@ -6,8 +7,8 @@ import SwiftUI
 ///
 /// `AttributedString(markdown:)` only produces *inline* intents that `Text` can
 /// draw (bold, italic, code, link, strikethrough). Block structure — headings,
-/// fenced code, quotes, lists — arrives as `presentationIntent` runs that `Text`
-/// silently ignores, so the block layer is parsed here and mapped onto real
+/// fenced code, quotes, lists, tables — arrives as `presentationIntent` runs that
+/// `Text` silently ignores, so the block layer is parsed here and mapped onto real
 /// SwiftUI views. No third-party markdown library is used or allowed.
 struct MarkdownBlock: Identifiable, Hashable {
     enum Kind: Hashable {
@@ -18,6 +19,9 @@ struct MarkdownBlock: Identifiable, Hashable {
         case code(language: String?, code: String, isClosed: Bool)
         case quote(String)
         case list(ordered: Bool, start: Int, items: [String])
+        /// `isClosed == false` means streaming ended before a closing blank line
+        /// or next block, so the table renders as in-progress rather than failing.
+        case table(header: [String], rows: [[String]], isClosed: Bool)
         case rule
     }
 
@@ -28,12 +32,23 @@ struct MarkdownBlock: Identifiable, Hashable {
     let kind: Kind
     var cachedAttributed: AttributedString?
     var cachedListAttributed: [AttributedString]?
+    var cachedTableHeaderAttributed: [AttributedString]?
+    var cachedTableRowsAttributed: [[AttributedString]]?
 
-    init(id: Int, kind: Kind, cachedAttributed: AttributedString? = nil, cachedListAttributed: [AttributedString]? = nil) {
+    init(
+        id: Int,
+        kind: Kind,
+        cachedAttributed: AttributedString? = nil,
+        cachedListAttributed: [AttributedString]? = nil,
+        cachedTableHeaderAttributed: [AttributedString]? = nil,
+        cachedTableRowsAttributed: [[AttributedString]]? = nil
+    ) {
         self.id = id
         self.kind = kind
         self.cachedAttributed = cachedAttributed
         self.cachedListAttributed = cachedListAttributed
+        self.cachedTableHeaderAttributed = cachedTableHeaderAttributed
+        self.cachedTableRowsAttributed = cachedTableRowsAttributed
     }
 
     mutating func precomputeAttributed(sources: [SearchResult]? = nil) {
@@ -44,6 +59,11 @@ struct MarkdownBlock: Identifiable, Hashable {
             cachedAttributed = MarkdownInline.attributed(text)
         case let .list(_, _, items):
             cachedListAttributed = items.map { MarkdownInline.attributed($0) }
+        case let .table(header, rows, _):
+            cachedTableHeaderAttributed = header.map { MarkdownInline.attributed($0, sources: sources) }
+            cachedTableRowsAttributed = rows.map { row in
+                row.map { MarkdownInline.attributed($0, sources: sources) }
+            }
         case .code, .rule:
             break
         }
@@ -247,12 +267,107 @@ enum MarkdownBlockParser {
                 continue
             }
 
+            if trimmed.contains("|"), index + 1 < lines.count, isTableDelimiterRow(lines[index + 1]) {
+                flushParagraph()
+                let header = parseTableRow(line)
+                index += 2
+                var rows: [[String]] = []
+                var closed = false
+                while index < lines.count {
+                    let rowLine = lines[index]
+                    let rowTrimmed = rowLine.trimmingCharacters(in: .whitespaces)
+                    if rowTrimmed.isEmpty {
+                        closed = true
+                        index += 1
+                        break
+                    }
+                    if MarkdownFence.opener(rowLine) != nil ||
+                        isThematicBreak(rowTrimmed) ||
+                        heading(rowTrimmed) != nil ||
+                        rowTrimmed.hasPrefix(">") ||
+                        listItem(rowTrimmed) != nil
+                    {
+                        closed = true
+                        break
+                    }
+                    guard rowTrimmed.contains("|") else {
+                        closed = true
+                        break
+                    }
+                    rows.append(parseTableRow(rowLine))
+                    index += 1
+                }
+                emit(.table(header: header, rows: rows, isClosed: closed))
+                continue
+            }
+
             paragraph.append(String(line))
             index += 1
         }
 
         flushParagraph()
         return blocks
+    }
+
+    private static func parseTableRow(_ line: Substring) -> [String] {
+        var trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("|") {
+            trimmed.removeFirst()
+        }
+        if trimmed.hasSuffix("|"), !trimmed.hasSuffix("\\|") {
+            trimmed.removeLast()
+        }
+        var cells: [String] = []
+        var current = ""
+        var isEscaped = false
+        for char in trimmed {
+            if isEscaped {
+                if char == "|" {
+                    current.append("|")
+                } else {
+                    current.append("\\")
+                    current.append(char)
+                }
+                isEscaped = false
+            } else if char == "\\" {
+                isEscaped = true
+            } else if char == "|" {
+                cells.append(current.trimmingCharacters(in: .whitespaces))
+                current.removeAll(keepingCapacity: true)
+            } else {
+                current.append(char)
+            }
+        }
+        if isEscaped {
+            current.append("\\")
+        }
+        cells.append(current.trimmingCharacters(in: .whitespaces))
+        return cells
+    }
+
+    private static func isTableDelimiterRow(_ line: Substring) -> Bool {
+        guard line.contains("|") else { return false }
+        let cells = parseTableRow(line)
+        guard !cells.isEmpty else { return false }
+        return cells.allSatisfy { isDelimiterCell($0) }
+    }
+
+    private static func isDelimiterCell(_ cell: String) -> Bool {
+        let trimmed = cell.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return false }
+        var dashes = 0
+        for (index, char) in trimmed.enumerated() {
+            if char == "-" {
+                dashes += 1
+            } else if char == ":" {
+                if index != 0 && index != trimmed.count - 1 {
+                    return false
+                }
+            } else {
+                return false
+            }
+        }
+        return dashes >= 1
     }
 
     private static func isThematicBreak(_ trimmed: String) -> Bool {
@@ -302,19 +417,213 @@ enum MarkdownInline {
     /// half-written emphasis run or a stray bracket from a partial stream renders
     /// as literal text rather than blanking the message.
     static func attributed(_ source: String, sources: [SearchResult]? = nil) -> AttributedString {
-        let prepared = prepareCitations(source, sources: sources)
+        let preparedMath = prepareMath(source)
+        let prepared = prepareCitations(preparedMath, sources: sources)
         var options = AttributedString.MarkdownParsingOptions()
         options.interpretedSyntax = .inlineOnlyPreservingWhitespace
         options.allowsExtendedAttributes = true
         options.failurePolicy = .returnPartiallyParsedIfPossible
-        return (try? AttributedString(markdown: prepared, options: options)) ?? AttributedString(source)
+        var attr = (try? AttributedString(markdown: prepared, options: options)) ?? AttributedString(source)
+        for run in attr.runs {
+            if let intent = run.inlinePresentationIntent, intent.contains(.code) {
+                attr[run.range].font = .appMono(size: 15, relativeTo: .body)
+            }
+        }
+        return attr
     }
+
+    /// Replaces common LaTeX math commands and inline/display math delimiters with
+    /// Unicode equivalents so math formulas render cleanly without full LaTeX rendering engines.
+    private static func prepareMath(_ text: String) -> String {
+        var result = text
+        if let displayRegex = try? NSRegularExpression(
+            pattern: #"\$\$(.+?)\$\$"#,
+            options: [.dotMatchesLineSeparators]
+        ) {
+            result = replaceMathMatches(in: result, regex: displayRegex)
+        }
+        if let bracketRegex = try? NSRegularExpression(
+            pattern: #"\\\[(.+?)\\\]"#,
+            options: [.dotMatchesLineSeparators]
+        ) {
+            result = replaceMathMatches(in: result, regex: bracketRegex)
+        }
+        if let parenRegex = try? NSRegularExpression(
+            pattern: #"\\\((.+?)\\\)"#,
+            options: [.dotMatchesLineSeparators]
+        ) {
+            result = replaceMathMatches(in: result, regex: parenRegex)
+        }
+        if let dollarRegex = try? NSRegularExpression(
+            pattern: #"(?<!\\|\$)\$(?!\s|\$)([^\$\n]+?)(?<!\s|\$)\$(?!\$)"#
+        ) {
+            result = replaceMathMatches(in: result, regex: dollarRegex)
+        }
+        result = replaceLaTeXCommands(in: result)
+        return result
+    }
+
+    private static func replaceMathMatches(in text: String, regex: NSRegularExpression) -> String {
+        let range = NSRange(text.startIndex..., in: text)
+        let matches = regex.matches(in: text, range: range)
+        guard !matches.isEmpty else { return text }
+
+        var result = ""
+        var lastIndex = text.startIndex
+
+        for match in matches {
+            guard let fullRange = Range(match.range, in: text),
+                  let innerRange = Range(match.range(at: 1), in: text) else { continue }
+            let innerText = String(text[innerRange])
+            let replacedInner = replaceLaTeXCommands(in: innerText)
+            result += text[lastIndex ..< fullRange.lowerBound]
+            result += replacedInner
+            lastIndex = fullRange.upperBound
+        }
+        result += text[lastIndex...]
+        return result
+    }
+
+    private static func replaceLaTeXCommands(in text: String) -> String {
+        guard text.contains("\\") else { return text }
+        guard let regex = try? NSRegularExpression(pattern: #"\\[a-zA-Z]+"#) else { return text }
+        let range = NSRange(text.startIndex..., in: text)
+        let matches = regex.matches(in: text, range: range)
+        guard !matches.isEmpty else { return text }
+
+        var result = ""
+        var lastIndex = text.startIndex
+
+        for match in matches {
+            guard let matchRange = Range(match.range, in: text) else { continue }
+            let command = String(text[matchRange])
+            result += text[lastIndex ..< matchRange.lowerBound]
+            if let symbol = latexSymbols[command] {
+                result += symbol
+            } else {
+                result += command
+            }
+            lastIndex = matchRange.upperBound
+        }
+        result += text[lastIndex...]
+        return result
+    }
+
+    private static let latexSymbols: [String: String] = [
+        // Arrows
+        "\\rightarrow": "→",
+        "\\leftarrow": "←",
+        "\\leftrightarrow": "↔",
+        "\\Rightarrow": "⇒",
+        "\\Leftarrow": "⇐",
+        "\\Leftrightarrow": "⇔",
+        "\\mapsto": "↦",
+        "\\to": "→",
+        "\\gets": "←",
+
+        // Set / logic
+        "\\in": "∈",
+        "\\notin": "∉",
+        "\\subset": "⊂",
+        "\\supset": "⊃",
+        "\\subseteq": "⊆",
+        "\\supseteq": "⊇",
+        "\\forall": "∀",
+        "\\exists": "∃",
+        "\\nexists": "∄",
+        "\\emptyset": "∅",
+        "\\land": "∧",
+        "\\lor": "∨",
+        "\\neg": "¬",
+        "\\cap": "∩",
+        "\\cup": "∪",
+
+        // Relations
+        "\\leq": "≤",
+        "\\le": "≤",
+        "\\geq": "≥",
+        "\\ge": "≥",
+        "\\neq": "≠",
+        "\\ne": "≠",
+        "\\approx": "≈",
+        "\\equiv": "≡",
+        "\\sim": "∼",
+        "\\propto": "∝",
+
+        // Arithmetic
+        "\\pm": "±",
+        "\\mp": "∓",
+        "\\times": "×",
+        "\\div": "÷",
+        "\\cdot": "·",
+        "\\bullet": "•",
+        "\\circ": "∘",
+        "\\degree": "°",
+        "\\sqrt": "√",
+
+        // Calculus / symbols
+        "\\infty": "∞",
+        "\\partial": "∂",
+        "\\nabla": "∇",
+        "\\sum": "∑",
+        "\\prod": "∏",
+        "\\int": "∫",
+        "\\dots": "…",
+        "\\cdots": "…",
+        "\\ldots": "…",
+
+        // Greek lowercase
+        "\\alpha": "α",
+        "\\beta": "β",
+        "\\gamma": "γ",
+        "\\delta": "δ",
+        "\\epsilon": "ε",
+        "\\varepsilon": "ε",
+        "\\zeta": "ζ",
+        "\\eta": "η",
+        "\\theta": "θ",
+        "\\vartheta": "θ",
+        "\\iota": "ι",
+        "\\kappa": "κ",
+        "\\lambda": "λ",
+        "\\mu": "μ",
+        "\\nu": "ν",
+        "\\xi": "ξ",
+        "\\pi": "π",
+        "\\varpi": "π",
+        "\\rho": "ρ",
+        "\\varrho": "ρ",
+        "\\sigma": "σ",
+        "\\varsigma": "ς",
+        "\\tau": "τ",
+        "\\upsilon": "υ",
+        "\\phi": "φ",
+        "\\varphi": "φ",
+        "\\chi": "χ",
+        "\\psi": "ψ",
+        "\\omega": "ω",
+
+        // Greek uppercase
+        "\\Gamma": "Γ",
+        "\\Delta": "Δ",
+        "\\Theta": "Θ",
+        "\\Lambda": "Λ",
+        "\\Xi": "Ξ",
+        "\\Pi": "Π",
+        "\\Sigma": "Σ",
+        "\\Upsilon": "Υ",
+        "\\Phi": "Φ",
+        "\\Psi": "Ψ",
+        "\\Omega": "Ω",
+    ]
 
     /// Links `[n]` citation markers to their corresponding source URLs (R4.4).
     private static func prepareCitations(_ text: String, sources: [SearchResult]?) -> String {
         guard let sources, !sources.isEmpty else { return text }
         // Match [1], [2], etc. that are not already markdown links or code spans
-        guard let regex = try? NSRegularExpression(pattern: #"(?<!\[|\`|\\)\[([1-9][0-9]?)\](?!\(|\`|\])"#) else {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"(?<!\[|\`|\\)\[([1-9][0-9]?)\](?!\(|\`|\])"#
+        ) else {
             return text
         }
         let range = NSRange(text.startIndex..., in: text)
@@ -365,8 +674,8 @@ enum MarkdownCache {
             return cached
         }
         var parsed = MarkdownBlockParser.parse(source)
-        for i in parsed.indices {
-            parsed[i].precomputeAttributed(sources: sources)
+        for index in parsed.indices {
+            parsed[index].precomputeAttributed(sources: sources)
         }
         storage[key] = parsed
         order.append(key)
@@ -392,26 +701,17 @@ enum MarkdownCache {
 
 // MARK: - Views
 
-/// Renders committed markdown. The in-flight message deliberately does *not* use
-/// this — see `StreamingMessageView`.
-struct MarkdownBlocksView: View, Equatable {
-    let source: String
+/// Renders a single markdown block. Shared by `MarkdownBlocksView` (for committed messages)
+/// and `StreamingMessageView` (for live in-flight streaming).
+struct MarkdownBlockView: View, Equatable {
+    let block: MarkdownBlock
     var sources: [SearchResult]?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(MarkdownCache.blocks(for: source, sources: sources)) { block in
-                view(for: block)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    @ViewBuilder
-    private func view(for block: MarkdownBlock) -> some View {
         switch block.kind {
         case let .paragraph(text):
             Text(block.cachedAttributed ?? MarkdownInline.attributed(text, sources: sources))
+                .font(.appSans(.body))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -432,6 +732,7 @@ struct MarkdownBlocksView: View, Equatable {
                     .fill(Color.accentColor.opacity(0.5))
                     .frame(width: 3)
                 Text(block.cachedAttributed ?? MarkdownInline.attributed(text))
+                    .font(.appSans(.body))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -448,14 +749,26 @@ struct MarkdownBlocksView: View, Equatable {
                     }()
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(ordered ? "\(start + offset)." : "•")
+                            .font(.appSans(.body))
                             .monospacedDigit()
                             .foregroundStyle(.secondary)
                         Text(attributedItem)
+                            .font(.appSans(.body))
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             }
+
+        case let .table(header, rows, isClosed):
+            TableView(
+                header: header,
+                rows: rows,
+                isClosed: isClosed,
+                headerAttributed: block.cachedTableHeaderAttributed,
+                rowsAttributed: block.cachedTableRowsAttributed,
+                sources: sources
+            )
 
         case .rule:
             Divider()
@@ -464,10 +777,26 @@ struct MarkdownBlocksView: View, Equatable {
 
     private func headingFont(_ level: Int) -> Font {
         switch level {
-        case 1: return .title2.weight(.bold)
-        case 2: return .title3.weight(.semibold)
-        default: return .headline
+        case 1: return .appSans(.title2, weight: .bold)
+        case 2: return .appSans(.title3, weight: .semibold)
+        default: return .appSans(.headline, weight: .semibold)
         }
+    }
+}
+
+/// Renders committed markdown.
+struct MarkdownBlocksView: View, Equatable {
+    let source: String
+    var sources: [SearchResult]?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(MarkdownCache.blocks(for: source, sources: sources)) { block in
+                MarkdownBlockView(block: block, sources: sources)
+                    .equatable()
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -477,21 +806,48 @@ private struct CodeBlockView: View {
     let language: String?
     let code: String
     let isClosed: Bool
+    @State private var copied = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let language, !language.isEmpty {
-                Text(language)
-                    .font(.caption2)
+            HStack {
+                if let language, !language.isEmpty {
+                    Text(language)
+                        .font(.appSans(.caption2, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    UIPasteboard.general.string = code
+                    withAnimation(.snappy(duration: 0.2)) {
+                        copied = true
+                    }
+                    Task {
+                        try? await Task.sleep(for: .seconds(1.5))
+                        withAnimation(.snappy(duration: 0.2)) {
+                            copied = false
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        Text(copied ? "Copied" : "Copy")
+                    }
+                    .font(.appSans(.caption2))
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Copy code")
             }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
+
             ScrollView(.horizontal) {
                 Text(code.isEmpty ? " " : code)
-                    .font(.system(.footnote, design: .monospaced))
+                    .font(.appMono(.footnote))
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 8)
             }
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         }
@@ -507,5 +863,67 @@ private struct CodeBlockView: View {
             }
         }
         .accessibilityLabel(language.map { "Code block, \($0)" } ?? "Code block")
+    }
+}
+
+/// Tables live in a horizontal `ScrollView` with a `Grid` to prevent wide tables
+/// from blowing out horizontal transcript layout.
+private struct TableView: View {
+    let header: [String]
+    let rows: [[String]]
+    let isClosed: Bool
+    var headerAttributed: [AttributedString]?
+    var rowsAttributed: [[AttributedString]]?
+    var sources: [SearchResult]?
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
+                if !header.isEmpty {
+                    GridRow {
+                        ForEach(Array(header.enumerated()), id: \.offset) { offset, title in
+                            let text = headerAttributed.flatMap { offset < $0.count ? $0[offset] : nil }
+                                ?? MarkdownInline.attributed(title, sources: sources)
+                            Text(text.characters.isEmpty ? AttributedString(" ") : text)
+                                .font(.appSans(.body, weight: .bold))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    Divider()
+                        .gridCellUnsizedAxes(.horizontal)
+                }
+                ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
+                    GridRow {
+                        ForEach(Array(row.enumerated()), id: \.offset) { colIndex, cell in
+                            let text = rowsAttributed.flatMap { rows in
+                                rowIndex < rows.count && colIndex < rows[rowIndex].count
+                                    ? rows[rowIndex][colIndex]
+                                    : nil
+                            } ?? MarkdownInline.attributed(cell, sources: sources)
+                            Text(text.characters.isEmpty ? AttributedString(" ") : text)
+                                .font(.appSans(.body))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    if rowIndex < rows.count - 1 {
+                        Divider()
+                            .opacity(0.4)
+                            .gridCellUnsizedAxes(.horizontal)
+                    }
+                }
+            }
+            .padding(12)
+        }
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(alignment: .bottom) {
+            if !isClosed {
+                Rectangle()
+                    .fill(Color.accentColor.opacity(0.35))
+                    .frame(height: 2)
+            }
+        }
+        .accessibilityLabel("Table with \(header.count) columns and \(rows.count) rows")
     }
 }

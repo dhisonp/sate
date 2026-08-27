@@ -10,6 +10,7 @@ public enum ThinkingPolicy {
         case anthropic
         case deepSeek
         case qwen
+        case google
         case workersAI
         case unknown
     }
@@ -40,6 +41,11 @@ public enum ThinkingPolicy {
             return ["thinking": .object(["type": .string("disabled")])]
         case .deepSeek:
             return ["thinking": .object(["enabled": .bool(false)])]
+        case .google:
+            return [
+                "thinking_config": .object(["thinking_budget": .number(0)]),
+                "enable_thinking": .bool(false),
+            ]
         case .openAI, .unknown:
             return [:]
         }
@@ -61,6 +67,13 @@ public enum ThinkingPolicy {
             return ["thinking": .object(["enabled": .bool(true)])]
         case .qwen, .workersAI:
             return ["enable_thinking": .bool(true)]
+        case .google:
+            return [
+                "thinking_config": .object([
+                    "thinking_budget": .number(Double(googleBudget(for: level))),
+                ]),
+                "enable_thinking": .bool(true),
+            ]
         case .unknown:
             return [:]
         }
@@ -72,6 +85,15 @@ public enum ThinkingPolicy {
         case .low: return 2000
         case .medium: return 8000
         case .high: return 32000
+        }
+    }
+
+    private static func googleBudget(for level: ThinkingLevel) -> Int {
+        switch level {
+        case .off: return 0
+        case .low: return 2048
+        case .medium: return 8192
+        case .high: return 24576
         }
     }
 
@@ -89,6 +111,9 @@ public enum ThinkingPolicy {
         }
         if lower.contains("qwen") {
             return .qwen
+        }
+        if lower.contains("google") || lower.contains("gemini") || lower.contains("gemma") {
+            return .google
         }
         if lower.hasPrefix("@cf/") || lower.hasPrefix("workers-ai/@cf/") {
             return .workersAI

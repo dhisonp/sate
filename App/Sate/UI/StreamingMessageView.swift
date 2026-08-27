@@ -7,47 +7,37 @@ import SwiftUI
 /// touched the draft would re-evaluate the entire transcript at the flush cadence
 /// (~60/s, with tokens arriving at up to 300/s).
 ///
-/// Layout strategy: text laid out as one growing `Text` is O(n) to measure and is
-/// re-measured on every flush, which is O(n²) across a response. Instead the text
-/// is split into fence-aware paragraphs; every paragraph but the last is a frozen
-/// `Text` with a stable id whose value has not changed, so SwiftUI skips it, and
-/// only the trailing paragraph is re-laid out.
-///
-/// The trailing paragraph is plain text, not markdown: block re-parsing per flush
-/// would defeat the point, and partially-typed syntax renders as noise. Full
-/// markdown appears the instant the message commits into `MessageBubble`.
+/// Markdown blocks are parsed on every flush. Each block is rendered in an
+/// `Equatable` `MarkdownBlockView`, so SwiftUI skips re-evaluating preceding frozen
+/// blocks and only re-lays out the trailing block in flight.
 struct StreamingMessageView: View {
     let draft: Draft
     var isThinking: Bool = false
+    var showThinking: Bool = true
 
     var body: some View {
-        let paragraphs = MarkdownParagraphs.split(draft.text)
+        let blocks = MarkdownBlockParser.parse(draft.text)
 
-        if !draft.isActive && paragraphs.isEmpty {
+        if !draft.isActive && blocks.isEmpty && (!showThinking || draft.reasoning.isEmpty) {
             EmptyView()
         } else {
             VStack(alignment: .leading, spacing: 10) {
-                StreamingReasoningView(draft: draft)
-                    .equatable()
+                if showThinking {
+                    StreamingReasoningView(draft: draft)
+                        .equatable()
+                }
 
                 if draft.text.isEmpty {
                     ThinkingIndicator(draft: draft, isThinking: isThinking)
                         .padding(.vertical, 2)
                 } else {
-                    ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
-                        if index == paragraphs.count - 1 {
-                            // The only view that re-lays out on a token flush.
-                            Text(paragraph)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                            FrozenParagraph(text: paragraph)
-                                .equatable()
-                        }
+                    ForEach(blocks) { block in
+                        MarkdownBlockView(block: block, sources: nil)
+                            .equatable()
                     }
                 }
             }
-            .font(.body)
+            .font(.appSans(.body))
             // Selection resets and flickers while the text mutates; committed
             // messages enable it instead.
             .textSelection(.disabled)
@@ -56,21 +46,7 @@ struct StreamingMessageView: View {
             .accessibilityLabel("Assistant is responding")
             .accessibilityAddTraits(.updatesFrequently)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 4)
         }
-    }
-}
-
-/// A paragraph that will never change again. `Equatable` conformance plus
-/// `.equatable()` makes the "unchanged" case a single string comparison instead
-/// of a body evaluation and a text re-measure.
-private struct FrozenParagraph: View, Equatable {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -91,10 +67,10 @@ private struct StreamingReasoningView: View, Equatable {
         if !reasoning.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 Label("Reasoning", systemImage: "brain")
-                    .font(.caption.weight(.semibold))
+                    .font(.appSans(.caption, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Text(reasoning)
-                    .font(.callout)
+                    .font(.appSans(.callout))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -122,7 +98,7 @@ struct ThinkingIndicator: View {
             ProgressView()
                 .controlSize(.small)
             Text(label(for: seconds, isThinking: activeThinking))
-                .font(.footnote)
+                .font(.appSans(.footnote))
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
         }

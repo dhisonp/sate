@@ -185,6 +185,16 @@ public struct ContextBuilder: Sendable {
         var isProtected: Bool
     }
 
+    private func sanitizeText(_ message: Message) -> Message {
+        var copy = message
+        copy.reasoning = nil
+        let stripped = ReasoningTagParser.strip(from: message.text)
+        if stripped != message.text {
+            copy.content = [.text(stripped)]
+        }
+        return copy
+    }
+
     /// Drops empty assistant turns, orphaned tools, and strips reasoning.
     ///
     /// Tool calls and tool responses are validated so that an assistant message
@@ -197,8 +207,9 @@ public struct ContextBuilder: Sendable {
             let message = branch[i]
 
             if message.role == .assistant {
-                let hasToolCalls = !(message.toolCalls?.isEmpty ?? true)
-                let textEmpty = message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                let cleanMessage = sanitizeText(message)
+                let hasToolCalls = !(cleanMessage.toolCalls?.isEmpty ?? true)
+                let textEmpty = cleanMessage.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
                 // Empty assistant turn with no tool calls is dropped.
                 if textEmpty, !hasToolCalls {
@@ -206,16 +217,14 @@ public struct ContextBuilder: Sendable {
                     continue
                 }
 
-                var copy = message
-                copy.reasoning = nil
+                var copy = cleanMessage
 
                 if hasToolCalls {
                     // Check if following messages contain corresponding tool results.
                     var toolMessages: [Message] = []
                     var j = i + 1
                     while j < branch.count, branch[j].role == .tool {
-                        var toolCopy = branch[j]
-                        toolCopy.reasoning = nil
+                        let toolCopy = sanitizeText(branch[j])
                         toolMessages.append(toolCopy)
                         j += 1
                     }
@@ -243,8 +252,7 @@ public struct ContextBuilder: Sendable {
                 i += 1
                 continue
             } else {
-                var copy = message
-                copy.reasoning = nil
+                let copy = sanitizeText(message)
                 result.append(copy)
                 i += 1
             }

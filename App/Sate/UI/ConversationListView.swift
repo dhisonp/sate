@@ -13,6 +13,9 @@ struct ConversationListView: View {
     @State private var editMode: EditMode = .inactive
     @State private var isShowingBatchDeleteDialog = false
     @State private var isShowingDeleteAllDialog = false
+    @State private var renamingID: UUID?
+    @State private var renameText = ""
+    @FocusState private var isRenameFocused: Bool
 
     private var navigationTitle: String {
         guard editMode.isEditing else { return "" }
@@ -29,14 +32,39 @@ struct ConversationListView: View {
                 Section { emptyState }
             } else {
                 ForEach(env.conversations) { summary in
-                    NavigationLink(value: SateRoute.chat(summary.id)) {
-                        row(for: summary)
-                    }
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            Task { await env.delete(summary.id) }
-                        } label: {
-                            Label("Delete", systemImage: "trash")
+                    if renamingID == summary.id {
+                        TextField("Title", text: $renameText)
+                            .font(.appSans(.body))
+                            .textFieldStyle(.plain)
+                            .focused($isRenameFocused)
+                            .submitLabel(.done)
+                            .onSubmit {
+                                commitRename(for: summary.id)
+                            }
+                    } else {
+                        NavigationLink(value: SateRoute.chat(summary.id)) {
+                            row(for: summary)
+                        }
+                        .contextMenu {
+                            Button {
+                                renameText = summary.title
+                                renamingID = summary.id
+                                isRenameFocused = true
+                            } label: {
+                                Label("Rename", systemImage: "pencil")
+                            }
+                            Button(role: .destructive) {
+                                Task { await env.delete(summary.id) }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                Task { await env.delete(summary.id) }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
                         }
                     }
                 }
@@ -94,7 +122,7 @@ struct ConversationListView: View {
                 if env.isMock {
                     ToolbarItem(placement: .principal) {
                         Text("MOCK")
-                            .font(.caption2.weight(.bold))
+                            .font(.appSans(.caption2, weight: .bold))
                             .foregroundStyle(.orange)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
@@ -169,6 +197,13 @@ struct ConversationListView: View {
         .onChange(of: editMode) { _, newMode in
             if !newMode.isEditing {
                 selectedIDs.removeAll()
+            } else {
+                renamingID = nil
+            }
+        }
+        .onChange(of: isRenameFocused) { _, focused in
+            if !focused, let id = renamingID {
+                commitRename(for: id)
             }
         }
     }
@@ -178,7 +213,7 @@ struct ConversationListView: View {
     private func row(for summary: ConversationSummary) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(summary.title.isEmpty ? "New Conversation" : summary.title)
-                .font(.body)
+                .font(.appSans(.body))
                 .lineLimit(1)
             HStack(spacing: 6) {
                 Text(summary.model)
@@ -187,7 +222,7 @@ struct ConversationListView: View {
                 Text("·")
                 Text(summary.updatedAt, format: .relative(presentation: .named))
             }
-            .font(.caption)
+            .font(.appSans(.caption))
             .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
@@ -206,7 +241,7 @@ struct ConversationListView: View {
                 : "\(env.recoveredCount) interrupted responses recovered",
             systemImage: "arrow.uturn.backward.circle"
         )
-        .font(.footnote)
+        .font(.appSans(.footnote))
         .foregroundStyle(.secondary)
     }
 
@@ -241,6 +276,14 @@ struct ConversationListView: View {
     }
 
     // MARK: Actions
+
+    private func commitRename(for id: UUID) {
+        let title = renameText
+        renamingID = nil
+        Task {
+            await env.rename(id, to: title)
+        }
+    }
 
     private func createConversation() {
         guard !isCreating else { return }

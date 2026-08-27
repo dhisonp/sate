@@ -1,2 +1,4 @@
 --indent 4
 --trim-whitespace always
+--disable redundantSelf
+

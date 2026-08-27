@@ -40,7 +40,9 @@ final class ChatViewModel {
     var input: String = ""
     var isSearchEnabled: Bool
     var thinkingLevel: ThinkingLevel
-    private(set) var title: String
+    var title: String
+    private(set) var isRenaming: Bool = false
+    var renameDraft: String = ""
     var model: String {
         didSet {
             guard !isApplyingSnapshot, model != oldValue else { return }
@@ -232,6 +234,29 @@ final class ChatViewModel {
             cursor = child
         }
         return cursor
+    }
+
+    // MARK: - Renaming
+
+    func beginRename() {
+        isRenaming = true
+        renameDraft = title
+    }
+
+    func commitRename() async {
+        let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != title else {
+            isRenaming = false
+            return
+        }
+        try? await store.update(title: trimmed, model: nil, for: conversationID)
+        title = trimmed
+        isRenaming = false
+        await environment.refresh()
+    }
+
+    func cancelRename() {
+        isRenaming = false
     }
 
     // MARK: - Scene phase

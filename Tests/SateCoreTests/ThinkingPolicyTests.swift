@@ -6,12 +6,24 @@ import Testing
 struct ThinkingPolicyTests {
     @Test("Off level emits provider-appropriate disable payloads for reasoning models")
     func offEmitsDisablePayloads() {
-        let workersReasoning = ["@cf/google/gemma-4-26b-a4b-it", "@cf/qwen/qwen3.8-27b", "qwen/qwen-2.5-max"]
-        for model in workersReasoning {
+        let qwenModels = ["@cf/qwen/qwen3.8-27b", "qwen/qwen-2.5-max"]
+        for model in qwenModels {
             let extra = ThinkingPolicy.extra(for: model, level: .off)
             #expect(
                 extra == ["enable_thinking": .bool(false)],
                 "Model \(model) must emit enable_thinking: false when .off"
+            )
+        }
+
+        let googleModels = ["@cf/google/gemma-4-26b-a4b-it", "google/gemini-2.5-flash", "gemini-2.0-flash-thinking-exp"]
+        for model in googleModels {
+            let extra = ThinkingPolicy.extra(for: model, level: .off)
+            #expect(
+                extra == [
+                    "thinking_config": .object(["thinking_budget": .number(0)]),
+                    "enable_thinking": .bool(false),
+                ],
+                "Model \(model) must emit Google thinking disable payload when .off"
             )
         }
 
@@ -97,10 +109,13 @@ struct ThinkingPolicyTests {
         }
     }
 
-    @Test("Workers AI reasoning models emit enable_thinking")
-    func workersAIReasoningThinking() {
+    @Test("Google models emit thinking_config and enable_thinking")
+    func googleThinking() {
         let extra = ThinkingPolicy.extra(for: "@cf/google/gemma-4-26b-a4b-it", level: .medium)
-        #expect(extra == ["enable_thinking": .bool(true)])
+        #expect(extra == [
+            "thinking_config": .object(["thinking_budget": .number(8192)]),
+            "enable_thinking": .bool(true),
+        ])
     }
 
     @Test("Non-reasoning catalog models emit empty extra even at high level")
@@ -142,5 +157,28 @@ struct ThinkingPolicyTests {
         let encoded = try JSONEncoder().encode(modified)
         let decodedRoundTrip = try JSONDecoder().decode(SateSettings.self, from: encoded)
         #expect(decodedRoundTrip.thinkingLevel == .medium)
+    }
+
+    @Test("SateSettings defaults showThinking to true and decodes additively")
+    func settingsShowThinkingDefaults() throws {
+        let defaults = SateSettings()
+        #expect(defaults.showThinking == true)
+
+        // Decoding JSON without showThinking key yields true
+        let jsonWithout = Data("{}".utf8)
+        let decodedWithout = try JSONDecoder().decode(SateSettings.self, from: jsonWithout)
+        #expect(decodedWithout.showThinking == true)
+
+        // Decoding JSON with showThinking: false
+        let jsonWith = Data(#"{"showThinking": false}"#.utf8)
+        let decodedWith = try JSONDecoder().decode(SateSettings.self, from: jsonWith)
+        #expect(decodedWith.showThinking == false)
+
+        // Round-trip encoding
+        var modified = SateSettings()
+        modified.showThinking = false
+        let encoded = try JSONEncoder().encode(modified)
+        let decodedRoundTrip = try JSONDecoder().decode(SateSettings.self, from: encoded)
+        #expect(decodedRoundTrip.showThinking == false)
     }
 }

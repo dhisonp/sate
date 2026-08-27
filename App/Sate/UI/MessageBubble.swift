@@ -11,11 +11,12 @@ struct MessageBubble: View, Equatable {
     /// All messages sharing this message's parent, in append order. More than one
     /// means the user forked here and gets "‹ 2/3 ›" navigation.
     let siblings: [UUID]
+    var showThinking: Bool = true
     let onEdit: (Message) -> Void
     let onSwitchBranch: (UUID) -> Void
 
     nonisolated static func == (lhs: MessageBubble, rhs: MessageBubble) -> Bool {
-        lhs.message == rhs.message && lhs.siblings == rhs.siblings
+        lhs.message == rhs.message && lhs.siblings == rhs.siblings && lhs.showThinking == rhs.showThinking
     }
 
     var body: some View {
@@ -34,6 +35,7 @@ struct MessageBubble: View, Equatable {
         switch message.role {
         case .user:
             Text(message.text)
+                .font(.appSans(.body))
                 .fixedSize(horizontal: false, vertical: true)
                 .multilineTextAlignment(.leading)
                 .padding(.horizontal, 14)
@@ -58,7 +60,7 @@ struct MessageBubble: View, Equatable {
 
         case .assistant:
             VStack(alignment: .leading, spacing: 8) {
-                if let reasoning = message.reasoning, !reasoning.isEmpty {
+                if showThinking, let reasoning = message.reasoning, !reasoning.isEmpty {
                     ReasoningDisclosure(text: reasoning)
                 }
                 MarkdownBlocksView(source: message.text, sources: message.sources)
@@ -78,7 +80,7 @@ struct MessageBubble: View, Equatable {
 
         case .system, .tool:
             Text(message.text)
-                .font(.footnote)
+                .font(.appSans(.footnote))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -87,11 +89,12 @@ struct MessageBubble: View, Equatable {
     @ViewBuilder
     private var metadata: some View {
         let tags = statusTags
-        if !tags.isEmpty || siblings.count > 1 {
+        let hasCopyButton = message.role == .assistant && !message.text.isEmpty
+        if !tags.isEmpty || siblings.count > 1 || hasCopyButton {
             HStack(spacing: 10) {
                 ForEach(tags, id: \.self) { tag in
                     Text(tag)
-                        .font(.caption2.weight(.medium))
+                        .font(.appSans(.caption2, weight: .medium))
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
                         .background(Color.secondary.opacity(0.15), in: Capsule())
@@ -104,7 +107,11 @@ struct MessageBubble: View, Equatable {
                         onSwitch: onSwitchBranch
                     )
                 }
+                if hasCopyButton {
+                    CopyResponseButton(text: message.text)
+                }
             }
+            .padding(.top, 4)
             .frame(
                 maxWidth: .infinity,
                 alignment: message.role == .user ? .trailing : .leading
@@ -131,6 +138,38 @@ struct MessageBubble: View, Equatable {
     }
 }
 
+private struct CopyResponseButton: View {
+    let text: String
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            UIPasteboard.general.string = text
+            withAnimation(.snappy(duration: 0.2)) {
+                copied = true
+            }
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                withAnimation(.snappy(duration: 0.2)) {
+                    copied = false
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                Text(copied ? "Copied" : "Copy")
+            }
+            .font(.appSans(.caption2))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Color.secondary.opacity(0.12), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Copy full response")
+    }
+}
+
 /// "‹ 2/3 ›" at a fork. Switching the leaf is append-only in the store — nothing
 /// is deleted, so stepping back and forth is lossless.
 private struct SiblingNavigator: View {
@@ -152,7 +191,8 @@ private struct SiblingNavigator: View {
             .accessibilityLabel("Previous version")
 
             Text("\(index + 1)/\(siblings.count)")
-                .font(.caption2.monospacedDigit())
+                .font(.appSans(.caption2))
+                .monospacedDigit()
                 .foregroundStyle(.secondary)
 
             Button {
@@ -165,14 +205,14 @@ private struct SiblingNavigator: View {
             .disabled(index == siblings.count - 1)
             .accessibilityLabel("Next version")
         }
-        .font(.caption2)
+        .font(.appSans(.caption2))
         .buttonStyle(.plain)
         .foregroundStyle(.tint)
     }
 }
 
-/// Reasoning is stored for display but never replayed to the model, so it is
-/// collapsed by default to keep it visually out of the conversation proper.
+/// Reasoning is collapsed by default to keep the transcript compact,
+/// expandable on tap when the user wants to inspect thought steps.
 private struct ReasoningDisclosure: View {
     let text: String
     @State private var isExpanded = false
@@ -186,11 +226,11 @@ private struct ReasoningDisclosure: View {
             } label: {
                 HStack {
                     Label("Reasoning", systemImage: "brain")
-                        .font(.caption.weight(.semibold))
+                        .font(.appSans(.caption, weight: .semibold))
                         .foregroundStyle(.secondary)
                     Spacer()
                     Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
+                        .font(.appSans(.caption2, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 }
@@ -203,7 +243,7 @@ private struct ReasoningDisclosure: View {
 
             if isExpanded {
                 Text(text)
-                    .font(.callout)
+                    .font(.appSans(.callout))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)

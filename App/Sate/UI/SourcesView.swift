@@ -34,11 +34,11 @@ struct SourcesView: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
-                    .font(.caption2.weight(.semibold))
+                    .font(.appSans(.caption2, weight: .semibold))
                 Text("\(sources.count) \(sources.count == 1 ? "source" : "sources")")
-                    .font(.caption2.weight(.semibold))
+                    .font(.appSans(.caption2, weight: .semibold))
                 Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                    .font(.caption2)
+                    .font(.appSans(.caption2))
             }
             .foregroundStyle(.secondary)
             .padding(.horizontal, 10)
@@ -57,10 +57,10 @@ struct SourcesView: View {
                         Link(destination: url) {
                             HStack(spacing: 4) {
                                 Text("[\(index + 1)]")
-                                    .font(.caption2.weight(.bold))
+                                    .font(.appSans(.caption2, weight: .bold))
                                     .foregroundStyle(Color.accentColor)
                                 Text(displayName(for: source))
-                                    .font(.caption2)
+                                    .font(.appSans(.caption2))
                                     .lineLimit(1)
                             }
                             .padding(.horizontal, 8)
@@ -82,31 +82,31 @@ struct SourcesView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack(alignment: .center, spacing: 6) {
                                 Text("[\(index + 1)]")
-                                    .font(.caption.weight(.bold))
+                                    .font(.appSans(.caption, weight: .bold))
                                     .foregroundStyle(Color.accentColor)
                                 Text(displayName(for: source))
-                                    .font(.caption.weight(.medium))
+                                    .font(.appSans(.caption, weight: .medium))
                                     .foregroundStyle(.secondary)
                                 Spacer()
                                 if let date = source.publishedAt {
                                     Text(date, format: .dateTime.month().day().year())
-                                        .font(.caption2)
+                                        .font(.appSans(.caption2))
                                         .foregroundStyle(.secondary)
                                 }
                                 Image(systemName: "arrow.up.right")
-                                    .font(.caption2)
+                                    .font(.appSans(.caption2))
                                     .foregroundStyle(.secondary)
                             }
 
                             Text(source.title)
-                                .font(.footnote.weight(.semibold))
+                                .font(.appSans(.footnote, weight: .semibold))
                                 .foregroundStyle(.primary)
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
 
                             if !source.snippet.isEmpty {
                                 Text(source.snippet)
-                                    .font(.caption)
+                                    .font(.appSans(.caption))
                                     .foregroundStyle(.secondary)
                                     .lineLimit(3)
                                     .multilineTextAlignment(.leading)

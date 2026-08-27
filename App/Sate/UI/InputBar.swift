@@ -12,8 +12,6 @@ import SwiftUI
 struct InputBar: View {
     @Bindable var vm: ChatViewModel
     @FocusState private var isFocused: Bool
-    @State private var isConfigExpanded: Bool = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isBusy: Bool {
         vm.phase.isBusy
@@ -23,14 +21,11 @@ struct InputBar: View {
         !vm.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private var hasActiveConfig: Bool {
-        vm.isSearchEnabled || vm.thinkingLevel != .off
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             TextField("Message", text: $vm.input, axis: .vertical)
-                .lineLimit(1 ... 6)
+                .font(.appSans(.body))
+                .lineLimit(1 ... 8)
                 .textFieldStyle(.plain)
                 .focused($isFocused)
                 .submitLabel(.return)
@@ -39,7 +34,8 @@ struct InputBar: View {
                 .accessibilityLabel("Message")
 
             HStack(alignment: .center, spacing: 8) {
-                configBubble
+                thinkingButton
+                searchButton
 
                 Spacer(minLength: 0)
 
@@ -47,54 +43,10 @@ struct InputBar: View {
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.vertical, 14)
         .glassEffect(.regular, in: .rect(cornerRadius: 24))
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
-    }
-
-    private var configBubble: some View {
-        HStack(spacing: 8) {
-            Button {
-                withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8)) {
-                    isConfigExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: isConfigExpanded ? "chevron.left" : "slider.horizontal.3")
-                        .font(.system(size: 15, weight: .semibold))
-                    if !isConfigExpanded && hasActiveConfig {
-                        activeConfigBadges
-                    }
-                }
-                .foregroundStyle(hasActiveConfig ? Color.accentColor : Color.secondary)
-                .frame(minHeight: 36)
-                .padding(.horizontal, 10)
-                .background(Color.secondary.opacity(0.12), in: Capsule())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(isConfigExpanded ? "Collapse configuration" : "Expand configuration")
-
-            if isConfigExpanded {
-                thinkingButton
-                    .transition(.scale.combined(with: .opacity))
-                searchButton
-                    .transition(.scale.combined(with: .opacity))
-            }
-        }
-    }
-
-    private var activeConfigBadges: some View {
-        HStack(spacing: 4) {
-            if vm.thinkingLevel != .off {
-                Image(systemName: "brain.fill")
-                    .font(.system(size: 12, weight: .bold))
-            }
-            if vm.isSearchEnabled {
-                Image(systemName: "globe")
-                    .font(.system(size: 12, weight: .bold))
-            }
-        }
     }
 
     private var thinkingButton: some View {
@@ -109,11 +61,11 @@ struct InputBar: View {
                 Image(systemName: vm.thinkingLevel == .off ? "brain" : "brain.fill")
                     .font(.system(size: 14, weight: vm.thinkingLevel == .off ? .medium : .bold))
                 Text(vm.thinkingLevel.displayName)
-                    .font(.footnote.weight(.medium))
+                    .font(.appSans(.footnote, weight: .medium))
             }
             .foregroundStyle(vm.thinkingLevel == .off ? Color.secondary : Color.accentColor)
+            .frame(minHeight: 36)
             .padding(.horizontal, 10)
-            .padding(.vertical, 6)
             .background(Color.secondary.opacity(0.12), in: Capsule())
         }
         .accessibilityLabel("Thinking: \(vm.thinkingLevel.displayName)")
@@ -128,11 +80,11 @@ struct InputBar: View {
                 Image(systemName: "globe")
                     .font(.system(size: 14, weight: vm.isSearchEnabled ? .bold : .medium))
                 Text("Search")
-                    .font(.footnote.weight(.medium))
+                    .font(.appSans(.footnote, weight: .medium))
             }
             .foregroundStyle(vm.isSearchEnabled ? Color.accentColor : Color.secondary)
+            .frame(minHeight: 36)
             .padding(.horizontal, 10)
-            .padding(.vertical, 6)
             .background(Color.secondary.opacity(0.12), in: Capsule())
         }
         .buttonStyle(.plain)

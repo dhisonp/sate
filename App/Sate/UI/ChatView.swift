@@ -27,6 +27,7 @@ struct ChatView: View {
     @State private var editText = ""
     @State private var isEditingModel = false
     @State private var completionTrigger = 0
+    @FocusState private var isRenameFocused: Bool
 
     var body: some View {
         transcript
@@ -49,11 +50,21 @@ struct ChatView: View {
                     .padding(.top, 8)
                 }
             }
-            .navigationTitle(vm.title)
+            .navigationTitle(vm.isRenaming ? "" : vm.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .task(id: vm.conversationID) { await vm.load() }
             .onChange(of: vm.phase) { _, phase in announce(phase) }
+            .onChange(of: vm.isRenaming) { _, isRenaming in
+                if isRenaming {
+                    isRenameFocused = true
+                }
+            }
+            .onChange(of: isRenameFocused) { _, isFocused in
+                if !isFocused && vm.isRenaming {
+                    vm.cancelRename()
+                }
+            }
             // A success haptic on clean completion (R3.6); the counter only ever
             // increments on a terminal phase, so it never fires mid-stream.
             .sensoryFeedback(.success, trigger: completionTrigger)
@@ -87,16 +98,23 @@ struct ChatView: View {
                         MessageBubble(
                             message: message,
                             siblings: vm.siblings(of: message.id),
+                            showThinking: env.settings.showThinking,
                             onEdit: beginEditing,
                             onSwitchBranch: { id in Task { await vm.switchBranch(to: id) } }
                         )
                         .equatable()
                         .id(message.id)
+                        .transition(reduceMotion ? .identity : .opacity)
                     }
 
                     // Always present, so committing the draft into the transcript
                     // is not a view-type change and does not move the scroll.
-                    StreamingMessageView(draft: vm.draft, isThinking: vm.thinkingLevel != .off)
+                    StreamingMessageView(
+                        draft: vm.draft,
+                        isThinking: vm.thinkingLevel != .off,
+                        showThinking: env.settings.showThinking
+                    )
+                    .transition(reduceMotion ? .identity : .opacity)
 
                     completionFooter
 
@@ -106,6 +124,7 @@ struct ChatView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 16)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.12), value: vm.visibleMessages.count)
             }
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
@@ -119,6 +138,14 @@ struct ChatView: View {
                     isPinned = true
                 } else if isUserDriven {
                     isPinned = false
+                }
+            }
+            // Follow new output smoothly without lag or rubber-banding when pinned.
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentSize.height
+            } action: { _, _ in
+                if isPinned {
+                    proxy.scrollTo(bottomAnchor, anchor: .bottom)
                 }
             }
             // Geometry callbacks also fire for programmatic scrolls, so "the user
@@ -135,6 +162,11 @@ struct ChatView: View {
                     if isAtBottom {
                         isPinned = true
                     }
+                }
+            }
+            .onChange(of: vm.phase) { oldPhase, newPhase in
+                if isPinned, oldPhase == .streaming || oldPhase == .awaitingFirstToken || oldPhase.isBusy, !newPhase.isBusy {
+                    proxy.scrollTo(bottomAnchor, anchor: .bottom)
                 }
             }
             .overlay(alignment: .bottom) {
@@ -171,12 +203,12 @@ struct ChatView: View {
         {
             VStack(alignment: .leading, spacing: 3) {
                 Text(footerLine(trace: trace, usage: last.usage))
-                    .font(.caption2)
+                    .font(.appSans(.caption2))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
                 if (trace.step ?? 0) > 0 {
                     Label("served by fallback", systemImage: "arrow.triangle.branch")
-                        .font(.caption2)
+                        .font(.appSans(.caption2))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -216,7 +248,7 @@ struct ChatView: View {
             statusRow {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("Sending…").font(.footnote).foregroundStyle(.secondary)
+                    Text("Sending…").font(.appSans(.footnote)).foregroundStyle(.secondary)
                 }
                 .statusPillGlass()
             }
@@ -226,7 +258,7 @@ struct ChatView: View {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text("Searching “\(query)”…")
-                        .font(.footnote)
+                        .font(.appSans(.footnote))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -260,18 +292,18 @@ struct ChatView: View {
     private func recoveryRow(title: String) -> some View {
         HStack(spacing: 12) {
             Text(title)
-                .font(.footnote)
+                .font(.appSans(.footnote))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
             if vm.canContinue {
                 Button("Continue") { Task { await vm.continueGeneration() } }
-                    .font(.footnote.weight(.semibold))
+                    .font(.appSans(.footnote, weight: .semibold))
                     .buttonStyle(.bordered)
                     .buttonBorderShape(.capsule)
             }
             Button("Regenerate") { Task { await vm.regenerate() } }
-                .font(.footnote.weight(.semibold))
+                .font(.appSans(.footnote, weight: .semibold))
                 .buttonStyle(.bordered)
                 .buttonBorderShape(.capsule)
         }
@@ -284,14 +316,62 @@ struct ChatView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
-            Button {
-                isEditingModel = true
-            } label: {
-                Label(vm.model, systemImage: "cpu")
-                    .labelStyle(.iconOnly)
+        if vm.isRenaming {
+            @Bindable var vm = vm
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") {
+                    vm.cancelRename()
+                }
             }
-            .accessibilityLabel("Model: \(vm.model)")
+            ToolbarItem(placement: .principal) {
+                TextField("Title", text: $vm.renameDraft)
+                    .font(.appSans(.headline))
+                    .textFieldStyle(.plain)
+                    .multilineTextAlignment(.center)
+                    .focused($isRenameFocused)
+                    .submitLabel(.done)
+                    .onSubmit {
+                        Task { await vm.commitRename() }
+                    }
+                    .onKeyPress(.escape) {
+                        vm.cancelRename()
+                        return .handled
+                    }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") {
+                    Task { await vm.commitRename() }
+                }
+                .fontWeight(.semibold)
+                .disabled(vm.renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        } else {
+            ToolbarItem(placement: .principal) {
+                Button {
+                    guard !vm.phase.isBusy else { return }
+                    vm.beginRename()
+                    isRenameFocused = true
+                } label: {
+                    Text(vm.title)
+                        .font(.appSans(.headline))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                }
+                .buttonStyle(.plain)
+                .disabled(vm.phase.isBusy)
+                .accessibilityLabel("Conversation title: \(vm.title)")
+                .accessibilityHint(vm.phase.isBusy ? "" : "Double-tap to rename conversation")
+            }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isEditingModel = true
+                } label: {
+                    Label(vm.model, systemImage: "cpu")
+                        .labelStyle(.iconOnly)
+                }
+                .accessibilityLabel("Model: \(vm.model)")
+            }
         }
     }
 
@@ -330,7 +410,7 @@ private struct NewTokensChip: View {
     var body: some View {
         Button(action: onTap) {
             Label("New tokens", systemImage: "arrow.down")
-                .font(.footnote.weight(.semibold))
+                .font(.appSans(.footnote, weight: .semibold))
         }
         .buttonStyle(.glass)
         .buttonBorderShape(.capsule)
@@ -365,11 +445,11 @@ private struct ErrorBanner: View {
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 6) {
                 Text(error.userMessage)
-                    .font(.footnote)
+                    .font(.appSans(.footnote))
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Button("Retry", action: onRetry)
-                    .font(.footnote.weight(.semibold))
+                    .font(.appSans(.footnote, weight: .semibold))
                     .buttonStyle(.bordered)
                     .buttonBorderShape(.capsule)
             }
@@ -395,23 +475,28 @@ private struct EditMessageSheet: View {
 
     var body: some View {
         NavigationStack {
-            TextEditor(text: $text)
-                .font(.body)
-                .padding(12)
-                .navigationTitle("Edit Message")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { dismiss() }
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Resend") {
-                            onSubmit(text)
-                            dismiss()
-                        }
-                        .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
+            GlassEffectContainer {
+                TextEditor(text: $text)
+                    .font(.appSans(.body))
+                    .scrollContentBackground(.hidden)
+                    .padding(12)
+                    .glassEffect(.regular, in: .rect(cornerRadius: 18))
+                    .padding(16)
+            }
+            .navigationTitle("Edit Message")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
                 }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Resend") {
+                        onSubmit(text)
+                        dismiss()
+                    }
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
         }
         .presentationDetents([.medium, .large])
     }
