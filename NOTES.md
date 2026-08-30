@@ -52,6 +52,9 @@ and the current open-work list.
   badges). Apple's guidance is explicit that content — the transcript, bubbles,
   code blocks — must not be glass. Adjacent glass shares one
   `GlassEffectContainer`; glass cannot sample other glass.
+- **Typography: sans is Luxi Sans**, mono stays Atkinson Hyperlegible Mono.
+  Luxi has only Regular and Bold faces, so `AppFont.sansWeight` snaps
+  intermediate weights; sizes keep the HIG table in `Typography.swift`.
 - **`{{CURRENT_DATE}}` is substituted at request-build time**, not when the
   prompt is saved, so the model always knows today's real date. The default
   prompt is a research-assistant voice: direct answer first, length matched to

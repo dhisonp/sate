@@ -3,20 +3,16 @@ import Foundation
 import SwiftUI
 
 enum AppFont {
-    static let sansFamily = "Atkinson Hyperlegible Next"
+    static let sansFamily = "Luxi Sans"
     static let monoFamily = "Atkinson Hyperlegible Mono"
 
     static func registerFonts() {
-        var urls: [URL] = []
-        if let bundleURLs = Bundle.main.urls(forResourcesWithExtension: "otf", subdirectory: nil) {
-            urls.append(contentsOf: bundleURLs)
+        func fontURLs(in bundle: Bundle) -> [URL] {
+            ["otf", "ttf"].flatMap { bundle.urls(forResourcesWithExtension: $0, subdirectory: nil) ?? [] }
         }
+        var urls = fontURLs(in: Bundle.main)
         if urls.isEmpty {
-            for bundle in Bundle.allBundles {
-                if let bundleURLs = bundle.urls(forResourcesWithExtension: "otf", subdirectory: nil) {
-                    urls.append(contentsOf: bundleURLs)
-                }
-            }
+            urls = Bundle.allBundles.flatMap(fontURLs)
         }
         guard !urls.isEmpty else { return }
         CTFontManagerRegisterFontURLs(urls as CFArray, .process, true) { _, _ in
@@ -26,7 +22,7 @@ enum AppFont {
 }
 
 extension Font.TextStyle {
-    /// Point sizes for sans-serif (Atkinson Hyperlegible Next), adhering to standard HIG metrics.
+    /// Point sizes for sans-serif (Luxi Sans), adhering to standard HIG metrics.
     var sansPointSize: CGFloat {
         switch self {
         case .largeTitle: 34
@@ -115,7 +111,15 @@ extension Font {
     }
 
     static func appSans(size: CGFloat, weight: Font.Weight = .regular, relativeTo: Font.TextStyle = .body) -> Font {
-        .custom(AppFont.sansFamily, size: size, relativeTo: relativeTo).weight(weight)
+        .custom(AppFont.sansFamily, size: size, relativeTo: relativeTo).weight(sansWeight(weight))
+    }
+
+    /// Luxi Sans provides only Regular and Bold; intermediate weights snap to the nearest face.
+    private static func sansWeight(_ weight: Font.Weight) -> Font.Weight {
+        switch weight {
+        case .semibold, .bold, .heavy, .black: .bold
+        default: .regular
+        }
     }
 
     static func appMono(size: CGFloat, weight: Font.Weight = .regular, relativeTo: Font.TextStyle = .body) -> Font {

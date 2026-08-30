@@ -37,7 +37,6 @@ Tests/SateCoreTests/          Swift Testing suites + Fixtures/*.sse (captured, n
 scripts/                      build · test · lint · format · run · e2e · capture-fixtures
 docs/                         bugs.md, superpowers/specs/ (design + proposals), reference/liquid-glass-ios26.md
 NOTES.md                      current state and pending work
-artifacts/                    e2e screenshots + live capture headers
 local/                        operator secrets (Tavily, Cloudflare token) — never commit
 ```
 
